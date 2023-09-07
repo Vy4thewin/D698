@@ -1,0 +1,3 @@
+Data sets:
+
+California wild fires (json API):https://www.fire.ca.gov/incidents (https://incidents.fire.ca.gov/umbraco/api/IncidentApi/List?inactive=true)
