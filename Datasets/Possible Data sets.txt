@@ -4,3 +4,5 @@ California wildfires Incidents (json API):https://www.fire.ca.gov/incidents (htt
 
 Small Water Systems Risk Scores and Indicators(saw there is a county ID so might search for datasets with that id) 
 https://sandbox.data.ca.gov/dataset/drought-and-water-shortage-risk-small-suppliers-and-rural-communities-version-2021/220945c4-c8a9-42e2-b6a6-88873483c33e
+
+(going to explore more for better info-https://www.drought.gov/data-download)
