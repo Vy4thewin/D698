@@ -1,8 +1,11 @@
 Data sets:
 
-California wildfires Incidents (json API):https://www.fire.ca.gov/incidents (https://incidents.fire.ca.gov/umbraco/api/IncidentApi/List?inactive=true)
+California wildfires Incidents (JSON API):https://www.fire.ca.gov/incidents (https://incidents.fire.ca.gov/umbraco/api/IncidentApi/List?inactive=true)
 
 Small Water Systems Risk Scores and Indicators(saw there is a county ID so might search for datasets with that id) 
 https://sandbox.data.ca.gov/dataset/drought-and-water-shortage-risk-small-suppliers-and-rural-communities-version-2021/220945c4-c8a9-42e2-b6a6-88873483c33e
 
+Risk factor assessment ( California by tract, only available for csv download atm, will download once the question is approved. 
+
+https://hazards.fema.gov/nri/data-resources
 (going to explore more for better info-https://www.drought.gov/data-download)
