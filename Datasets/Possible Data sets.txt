@@ -12,3 +12,6 @@ https://hazards.fema.gov/nri/data-resources
 
 California's wildfire risk data
 https://www.huduser.gov/portal/datasets/CAWildfire.html
+
+Risk assessment with spatial data set 
+https://www.fs.usda.gov/rds/archive/catalog/RDS-2020-0016
