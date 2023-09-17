@@ -9,3 +9,6 @@ Risk factor assessment ( California by tract, only available for csv download at
 
 https://hazards.fema.gov/nri/data-resources
 (going to explore more for better info-https://www.drought.gov/data-download)
+
+California's wildfire risk data
+https://www.huduser.gov/portal/datasets/CAWildfire.html
