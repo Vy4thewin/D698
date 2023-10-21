@@ -20,7 +20,7 @@ https://www.fs.usda.gov/rds/archive/catalog/RDS-2020-0016
 
 ------ 10/21 update
 
-A base data set is from the Wildfire risk assessment
+A base data set is from the Wildfire risk assessment *might use only a few items as NRI has more data
 https://www.fs.usda.gov/rds/archive/catalog/RDS-2020-0016
 
 This data set provides the probability and logistic assessment of an area that is likely to burn, the potential the wildfire is difficult to control, the flame length probability
