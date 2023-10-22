@@ -35,3 +35,7 @@ Average Precipitation and Average temperature for CA
 https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/county/mapping/4/tavg/202212/12/rank
 
 
+Average elevation by county
+https://edits.nationalmap.gov/apps/gaz-domestic/public/search/names
+
+
