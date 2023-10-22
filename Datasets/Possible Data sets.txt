@@ -34,8 +34,12 @@ https://www.huduser.gov/apps/public/uspscrosswalk/home
 Average Precipitation and Average temperature for CA
 https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/county/mapping/4/tavg/202212/12/rank
 
-
 Average elevation by county
 https://edits.nationalmap.gov/apps/gaz-domestic/public/search/names
+
+Slope data (LandFire 2020)
+
+Shapefile for Cali tracts
+https://www.census.gov/cgi-bin/geo/shapefiles/index.php?year=2022&layergroup=Census+Tracts
 
 
