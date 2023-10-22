@@ -25,10 +25,13 @@ https://www.fs.usda.gov/rds/archive/catalog/RDS-2020-0016
 
 This data set provides the probability and logistic assessment of an area that is likely to burn, the potential the wildfire is difficult to control, the flame length probability
 
-NRI also provides Wildfire Probability Data and a few land features.
+NRI also provides Wildfire Probability Data and a few land features. (enough data to do CA tracts only
 https://hazards.fema.gov/nri/data-resources#csvDownload
 
 combining with NRI Data set, need to map zipcodes to their tracts. Using US crosswalk data set to map zipcodes to their tracts (used 3rd quarter, 2022 Data set). Transform to only have zipcode, tract number, tract name. If mapping to NRI, map zips to "TRACTFIPS"
 https://www.huduser.gov/apps/public/uspscrosswalk/home
+
+Average Precipitation and Average temperature for CA
+https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/county/mapping/4/tavg/202212/12/rank
 
 
