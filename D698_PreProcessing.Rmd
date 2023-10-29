@@ -1,0 +1,93 @@
+---
+title: "Data 698 Pre-Processing Datasets"
+author: "Team Coffy and Vyanna"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(mice)
+#Uploading data sets for combination
+elevation<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/USGS_CACounties_elevation_2023 (1).csv")
+slope<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/SlopePercentage_Calitracts_LF2020.csv")
+whp<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/WHP2020_ZipCode_Summary - zipcode_summary.csv")
+
+weather<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/NOAA_CACounties_AverageTemp_2022.csv")
+rainfall<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/NOAA_CACounties_AveragePercipitation_2022.csv")
+
+LF_Vegdictonary<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/LF22_EVT_230 - LF22_EVT_230.csv.csv")
+cali_vegtype<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/CalifornianTracts_VegType_2022LF - test.csv.csv")
+
+```
+
+### Preprocessing Data
+
+The Slope data set is a GIS created file with the shapefile of California provided by the 2022 Census. This shapefile was overlay with the slope geofile provided by the LANDFIRE 2020, which contain the geospatial slope data of California. In GIS, the shapefile way overlay with the slope data and a zonal statistic was performed to find the tract's average slope. The final product is provided with "slope" data set.
+
+The zonal statistic was used in the vegetation type provided from the LANDFIRE 2022 Vegetation Type data set. The geo spatial data provided was used to find the zonal average vegetation for a Californian tract. This GIS Data set is represent by the "VegType" Data set.
+
+For the climate data, NOAA Provided 2022's Average rainfall and weather (temperature) through their "Climate At A glance" dashboard. This data set is at the county level as it was the lowest level provided by the NOAA. For reference,
+
+The team will need to combined all the feature data sets into one for the final combination with Fema's wildfire risk data set. The current change is dictating how the data sets will be binded and the operations performed to avoid over fitting. 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#combining the weather data set first as both on the county lvl. Only want the averages of the year
+cali_cweather<-weather%>%left_join(rainfall,by=join_by(ID))
+cali_cweather<-cali_cweather%>%select(-c("Rank.x","Anomaly (1901-2000 base period).x","1901-2000 Mean.x","Name.y","State.y","Rank.y","Anomaly (1901-2000 base period).y","1901-2000 Mean.y"))
+cali_cweather<-cali_cweather%>%rename(county_Id=ID,county_name=Name.x,State=State.x,avg_tempeture=Value.x,avg_precipitation=Value.y)
+
+#onto topographic data, will need to combine by county and lat/long(if possible)
+#Need the county ID in Slope data for left combine with elevation
+cali_topography<-slope%>%unite("countyID",1:2,remove = FALSE,sep = "")
+
+#14 rows missing slope data, can be zero slope but using mice for imputation
+cali_topography<-cali_topography%>%rename(tract_avgSlope="_mean",tract_countSlope="_count",tract_maxSlope="_max")
+cali_topography<-complete(mice(cali_topography,method = "cart",seed = 333))
+
+elevation<-elevation%>%rename(countyID="County FIPS Code")
+
+#mapping the tract data in topography by county ID and the closest match by Longitude
+cali_topography<-cali_topography%>%inner_join(elevation,by=join_by(countyID,closest(INTPTLON<=Longitude)))
+
+#removing unnecessary metrics and renaming columns for readability
+cali_topography<-cali_topography%>%select(-c("Latitude","Longitude","Bgn Decision Date","Entry Date","Census Code","Census Classification Code","GSA Code","OPM Code","State FIPS Code","Map","State","Class","tract_maxSlope","Gaz ID","Feature Name","tract_countSlope","MTFCC","FUNCSTAT"))
+cali_topography<-cali_topography%>%rename(tractID=NAME,land_Area=ALAND,water_Area=AWATER,latitude=INTPTLAT,longitude=INTPTLON,county_avgElevation=Elevation)
+
+#Using LandFire's vegetation type dictionary to map tract's average vegetation type
+#Filtering for CA tracts only
+cali_vegetation<-cali_vegtype%>%filter(STUSPS=="CA")
+lf_small<-LF_Vegdictonary%>%select("VALUE","EVT_NAME","EVT_LF","EVT_CLASS")
+cali_vegetation<-cali_vegetation%>%left_join(lf_small,by=join_by(closest("_mean">=VALUE)))
+
+#Cleaning up new data set
+cali_vegetation<-cali_vegetation%>%select(-c("STATEFP","COUNTYFP","TRACTCE","AFFGEOID","NAME","NAMELSAD","STUSPS","NAMELSADCO","STATE_NAME","LSAD","ALAND","AWATER","_count","_sum","_mean","VALUE","EVT_NAME","EVT_CLASS"))
+
+
+#Combing weather, topography, and vegetation
+cali_features<-cali_topography%>%left_join(cali_cweather,by=join_by(County==county_name))
+cali_features<-cali_features%>%select(-c("county_Id","State"))
+cali_vegetation<-cali_vegetation%>% mutate(GEOID = paste("0", GEOID, sep = ""))
+
+#Census Tract 9901 does not have vegetation as its the shoreline, replacing NAs with Water
+cali_features<-cali_features%>%left_join(cali_vegetation,by=join_by(GEOID))
+cali_features<-cali_features%>%mutate(EVT_LF=replace_na(EVT_LF,"Water"))
+
+#saving export
+write.csv(cali_features,"caliTracts_features.csv")
+
+```
+
+
+
+Table
+area=sqare meter
+''=inches
+degress
+
