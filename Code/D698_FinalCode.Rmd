@@ -1,0 +1,37 @@
+---
+title: "D698 Final Project"
+author: "Coffy Andrews-Guo, Vyanna Hill"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+[Hi! We can transfer code notes into the Data collection and Analysis portion of the paper. I'm thinking of adding in the combination data set steps in here if Jeff wants it to be here  ]
+
+```{r}
+### Data Exploration
+
+
+```
+
+```{r}
+### Data Preparation 
+
+```
+
+```{r}
+### Model Exploration 
+
+
+```
+
+```{r}
+### Data Analysis
+
+
+```
