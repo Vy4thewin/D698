@@ -86,8 +86,32 @@ write.csv(cali_features,"caliTracts_features.csv")
 
 
 
-Table
-area=sqare meter
-''=inches
-degress
+
+```{r}
+
+#Reducing predictors from NRI before combination
+
+nri_data<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/NRI_Table_CensusTracts_Subset.csv")
+nri<-nri_data%>%select("STATE","STATEABBRV","STATEFIPS","COUNTY","COUNTYTYPE","COUNTYFIPS","STCOFIPS","TRACT","TRACTFIPS","POPULATION","AREA","DRGT_EVNTS","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_EVNTS","WFIR_AFREQ","WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA","WFIR_HLRB","WFIR_HLRP","WFIR_HLRA","WFIR_HLRR","WFIR_EALT","WFIR_EALS","WFIR_EALR","WFIR_ALRA","WFIR_RISKV","WFIR_RISKS","WFIR_RISKR")
+
+#only CA cases, converting categorical to binary
+nri<-nri%>%filter(STATEABBRV=="CA")
+nri<-nri%>%mutate(WFRI_R=case_when(WFIR_RISKV<13000~0,WFIR_RISKV>13000~1))
+
+#Removal of extra columns
+nri<-nri%>%select(-c(WFIR_EVNTS,WFIR_HLRR,WFIR_EALR))
+
+
+#combination of cali features
+cali_features<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/caliTracts_features.csv")
+
+nri_cali<-nri%>%inner_join(cali_features,by=join_by(TRACTFIPS==GEOID))
+nri_cali<-nri_cali%>%select(-c(STATE,STATEABBRV,STATEFIPS,COUNTY,COUNTYTYPE,COUNTYFIPS,STCOFIPS,TRACT,...1,STATEFP,COUNTYFP,TRACTCE,tractID,NAMELSAD,land_Area,latitude,longitude,County,countyID))
+
+#renaming columns for reference
+nri_cali<-nri_cali%>%rename(TRCT_WAREA=water_Area,TRCT_SLOPE=tract_avgSlope,CNTY_ELEV=county_avgElevation,CNTY_TEMP=avg_tempeture,CNTY_PRECIP=avg_precipitation,TRCT_VEGLF=EVT_LF)
+
+write.csv(nri_cali,"nri_cali.csv")
+
+```
 
