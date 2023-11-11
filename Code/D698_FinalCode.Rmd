@@ -11,10 +11,69 @@ vignette: >
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
-[Hi! We can transfer code notes into the Data collection and Analysis portion of the paper. I'm thinking of adding in the combination data set steps in here if Jeff wants it to be here  ]
 
 ```{r}
+library(tidyverse)
+library(ggpubr)
+library(h2o)
 ### Data Exploration
+cali_data<-read_csv("C:/Users/walki/Documents/GitHub/D698/nri_cali.csv")
+
+#Removing non-important columns
+#Note: WFIR_RISKS AND WFIR_RISV holds actual percentages of the likelihood, cannot be included as predictor value 
+c_data<-cali_data%>%select(-c("...1","WFIR_RISKV","WFIR_RISKS","WFIR_HLRB"))
+
+#Looking at the summary of all variables in the data set
+summary(c_data)
+
+#checking for null values
+colSums(is.na(c_data))
+
+#Reviewing the current distribution of the predictor values. See if there's future transformations
+g1<-c_data%>%ggplot(aes(x=POPULATION))+geom_histogram(bins=20)+theme_light()
+g2<-c_data%>%ggplot(aes(x=AREA))+geom_histogram(bins=20)+theme_light()
+g3<-c_data%>%ggplot(aes(x=DRGT_EVNTS))+geom_histogram(bins=20)+theme_light()
+g4<-c_data%>%ggplot(aes(x=DRGT_AFREQ))+geom_histogram(bins=20)+theme_light()
+g5<-c_data%>%ggplot(aes(x=DRGT_HLRA))+geom_histogram(bins=20)+theme_light()
+g6<-c_data%>%ggplot(aes(x=HWAV_EVNTS))+geom_histogram(bins=30)+theme_light()
+g7<-c_data%>%ggplot(aes(x=HWAV_AFREQ))+geom_histogram(bins=20)+theme_light()
+g8<-c_data%>%ggplot(aes(x=HWAV_HLRA))+geom_histogram(bins=20)+theme_light()
+g9<-c_data%>%ggplot(aes(x=LTNG_EVNTS))+geom_histogram(bins=20)+theme_light()
+g10<-c_data%>%ggplot(aes(x=LTNG_AFREQ))+geom_histogram(bins=20)+theme_light()
+g11<-c_data%>%ggplot(aes(x=SWND_EVNTS))+geom_histogram(bins=20)+theme_light()
+g12<-c_data%>%ggplot(aes(x=SWND_AFREQ))+geom_histogram(bins=30)+theme_light()
+g13<-c_data%>%ggplot(aes(x=SWND_HLRA))+geom_histogram(bins=20)+theme_light()
+g14<-c_data%>%ggplot(aes(x=WFIR_AFREQ))+geom_histogram(bins=20)+theme_light()
+g15<-c_data%>%ggplot(aes(x=WFIR_EXPA))+geom_histogram(bins=20)+theme_light()
+g16<-c_data%>%ggplot(aes(x=WFIR_EXPT))+geom_histogram(bins=20)+theme_light()
+g17<-c_data%>%ggplot(aes(x=WFIR_EXP_AREA))+geom_histogram(bins=20)+theme_light()
+g18<-c_data%>%ggplot(aes(x=WFIR_HLRP))+geom_histogram(bins=30)+theme_light()
+g19<-c_data%>%ggplot(aes(x=WFIR_HLRA))+geom_histogram(bins=20)+theme_light()
+g20<-c_data%>%ggplot(aes(x=WFIR_EALT))+geom_histogram(bins=20)+theme_light()
+g21<-c_data%>%ggplot(aes(x=WFIR_EALS))+geom_histogram(bins=20)+theme_light()
+g22<-c_data%>%ggplot(aes(x=WFIR_ALRA))+geom_histogram(bins=20)+theme_light()
+g23<-c_data%>%ggplot(aes(x=TRCT_WAREA))+geom_histogram(bins=20)+theme_light()
+g24<-c_data%>%ggplot(aes(x=TRCT_SLOPE))+geom_histogram(bins=30)+theme_light()
+g25<-c_data%>%ggplot(aes(x=CNTY_ELEV))+geom_histogram(bins=20)+theme_light()
+g26<-c_data%>%ggplot(aes(x=CNTY_TEMP))+geom_histogram(bins=20)+theme_light()
+g27<-c_data%>%ggplot(aes(x=CNTY_PRECIP))+geom_histogram(bins=20)+theme_light()
+
+#Plot for project write up, only a selected few
+plt1<-ggarrange(g1,g2,g3,g4,g14,g22,g10,g7,nrow =4,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
+
+annotate_figure(plt1,top = text_grob("Distribution of Selected WildFire Predictor variables ",size=9))
+
+#From distribution plots, wildfire values is most skewed. may need additional support in transformations
+
+#Reviewing a few variables on its boxplots in reflection with the response variable WFRI_R
+g1<-c_data%>%ggplot(aes(y=TRCT_SLOPE,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Tract Slope")
+g2<-c_data%>%ggplot(aes(y=WFIR_HLRA,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="WildFire Historic Agriculture Loss Ratio")
+g3<-c_data%>%ggplot(aes(y=CNTY_PRECIP,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual County Precipitation")
+g4<-c_data%>%ggplot(aes(y=LTNG_EVNTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Lighting Events")
+
+plt1<-ggarrange(g1,g2,g3,g4,nrow =2,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
+
+annotate_figure(plt1,top = text_grob("Difference in Summary Statistics With Wildfire presence",size=9))
 
 
 ```
@@ -22,9 +81,44 @@ vignette: >
 ```{r}
 ### Data Preparation 
 
+#transforming the tract vegetation life into binary dummy variables via mutate
+unique(c_data$TRCT_VEGLF)
+c_data<-c_data%>%mutate(.isShrub=if_else(TRCT_VEGLF=="Shrub",1,0),
+                        .isTree=if_else(TRCT_VEGLF=="Tree",1,0),
+                        .isDeveloped=if_else(TRCT_VEGLF=="Developed",1,0),
+                        .isHerb=if_else(TRCT_VEGLF=="Herb",1,0),
+                        .isArgiculture=if_else(TRCT_VEGLF=="Argiculture",1,0),
+                        .isSparse=if_else(TRCT_VEGLF=="Sparse",1,0),
+                        .isBarren=if_else(TRCT_VEGLF=="Barren",1,0),
+                        .isSnowIce=if_else(TRCT_VEGLF=="Snow-Ice",1,0),
+                        )
+c_data<-c_data%>%select(-c("TRCT_VEGLF"))
+
+
+#Seeing if there's multi-collinearity in the current predictors
+temp<-c_data%>%select(-c("WFRI_R","TRACTFIPS"))
+temp<-cor(temp)
+as_tibble(temp)
+#transforming a few highly skewed predictors variables via boxcox
+
+#using h20 seeing variable importance 
+
 ```
 
 ```{r}
+### Model Exploration 
+
+#Model 1 Random Forest
+
+#Model 2 Boosted GLM Model
+```
+
+```{r}
+### Data Analysis
+
+
+```
+
 ### Model Exploration 
 
 
