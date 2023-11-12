@@ -15,11 +15,14 @@ vignette: >
 ```{r}
 library(tidyverse)
 library(ggpubr)
+library(caret)
+library(pROC) 
+library(caTools)
 library(h2o)
 ### Data Exploration
 cali_data<-read_csv("C:/Users/walki/Documents/GitHub/D698/nri_cali.csv")
 
-#Removing non-important columns
+#Removing non important columns
 #Note: WFIR_RISKS AND WFIR_RISV holds actual percentages of the likelihood, cannot be included as predictor value 
 c_data<-cali_data%>%select(-c("...1","WFIR_RISKV","WFIR_RISKS","WFIR_HLRB"))
 
@@ -67,7 +70,7 @@ annotate_figure(plt1,top = text_grob("Distribution of Selected WildFire Predicto
 
 #Reviewing a few variables on its boxplots in reflection with the response variable WFRI_R
 g1<-c_data%>%ggplot(aes(y=TRCT_SLOPE,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Tract Slope")
-g2<-c_data%>%ggplot(aes(y=WFIR_HLRA,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="WildFire Historic Agriculture Loss Ratio")
+g2<-c_data%>%ggplot(aes(y=WFIR_HLRA,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="WildFire Histortic Argiculture Loss Ratio")
 g3<-c_data%>%ggplot(aes(y=CNTY_PRECIP,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual County Precipitation")
 g4<-c_data%>%ggplot(aes(y=LTNG_EVNTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Lighting Events")
 
@@ -96,36 +99,69 @@ c_data<-c_data%>%select(-c("TRCT_VEGLF"))
 
 
 #Seeing if there's multi-collinearity in the current predictors
+#Drought events and drought frequency are highly correlated, Let's see with variable selection if one of the variables is dropped from the optimized predictor set
 temp<-c_data%>%select(-c("WFRI_R","TRACTFIPS"))
 temp<-cor(temp)
-as_tibble(temp)
-#transforming a few highly skewed predictors variables via boxcox
 
-#using h20 seeing variable importance 
+#setting the binary response and a few predictor variables as a factor before modeling
+c_data<-c_data%>%mutate_at(c('WFRI_R',".isShrub",".isTree",".isDeveloped",".isHerb",".isArgiculture",".isSparse",".isBarren",".isSnowIce"),as.factor)
+
+#splitting data set into testing and training
+temp<-sample.split(c_data$WFRI_R,SplitRatio = 0.8)
+training_data<-subset(c_data,temp==TRUE)
+test_data<-subset(c_data,temp==FALSE)
 
 ```
 
 ```{r}
-### Model Exploration 
+### Model Exploration
+
+#Using H2o package for all models tested as the package offers multiple models and other features for validation
+#connection to h20 server
+h2o.init()
+
+#Uploading the data set into h2o and splitting the dataset into training/test. Choosing an 80/20 split
+train.h2o<-as.h2o(training_data)
+test.h2o<-as.h2o(test_data)
 
 #Model 1 Random Forest
+#random forest- (like a decision tree, a collection of DTs with random subsets of the training set)
+#suspect RF has better scores with sensitivity with the randomly selected features from each tree subset
 
-#Model 2 Boosted GLM Model
+#As RF will handle feature selection with its random subset. Removing drg_events to prevent multi-collinearity in the model
+features<-c("POPULATION","AREA","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_AFREQ","WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA","WFIR_HLRP","WFIR_HLRA","WFIR_EALT","WFIR_EALS","WFIR_ALRA","TRCT_WAREA","TRCT_SLOPE","CNTY_ELEV","CNTY_TEMP","CNTY_PRECIP",".isShrub",".isTree",".isDeveloped",".isHerb",".isSparse",".isBarren",".isSnowIce")
+response<-c("WFRI_R")
+
+#creating RF model from the training set, setting up rf to have K cross-validation of 10
+#Also included a stopping metric to be AUC measurement, It will cut to the most optimal level of trees based on the AUC score. Set ntrees at >300 to give as many trees before its cut-off
+rf.model<-h2o.randomForest(x=features,y=response,training_frame = train.h2o,nfolds=10,stopping_metric = "AUC",ntrees=333,seed=333)
+
+#retrieve current model statistics from the training set
+rf.tresults<-rf.model@model$cross_validation_metrics_summary%>%select(c("mean","sd"))%>%t()
+
+#using the rf model, see the performance on the test data set
+#Accuracy 99%, R^2=97%, MSE=0.003
+rf.score<-h2o.performance(rf.model,test.h2o)
+
+#Printing out results from the first model and storing ROC Curve
+rf.score
+rf.roc<-rf.score@metrics$thresholds_and_metric_scores
+rf.roc<-rf.roc%>%select(tpr,fpr)%>%ggplot(aes(x=fpr,y=tpr))+geom_point(color="black",size=0.5)+geom_segment(aes(x=0,y=0,xend=1,yend=1),linetype="dotted",color="red")+labs(x="Specificty",y="sensitivity",title = "Random Forest ROC Curve")+theme_light()
+
+#review the feature importance of this random forest model
+rf.features<-h2o.varimp(rf.model)
+  
+#Model 2 Ada Boosted Decision Tree Model
 ```
 
 ```{r}
 ### Data Analysis
 
 
-```
-
-### Model Exploration 
-
-
-```
-
-```{r}
-### Data Analysis
+#remembering all models are predictions of a logistic regression
+#measurement of accuracy is different. Using McFadden's R^2 for measurement of fit and cross validation-Fit measurement, Error- AUC Curve
+#We care about TP identifying correctly- Heavy on precision, Classification error, Accuracy
+#second class- sensitivity, Specificity 
 
 
 ```
