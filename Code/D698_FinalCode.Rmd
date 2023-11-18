@@ -37,29 +37,10 @@ g1<-c_data%>%ggplot(aes(x=POPULATION))+geom_histogram(bins=20)+theme_light()
 g2<-c_data%>%ggplot(aes(x=AREA))+geom_histogram(bins=20)+theme_light()
 g3<-c_data%>%ggplot(aes(x=DRGT_EVNTS))+geom_histogram(bins=20)+theme_light()
 g4<-c_data%>%ggplot(aes(x=DRGT_AFREQ))+geom_histogram(bins=20)+theme_light()
-g5<-c_data%>%ggplot(aes(x=DRGT_HLRA))+geom_histogram(bins=20)+theme_light()
-g6<-c_data%>%ggplot(aes(x=HWAV_EVNTS))+geom_histogram(bins=30)+theme_light()
 g7<-c_data%>%ggplot(aes(x=HWAV_AFREQ))+geom_histogram(bins=20)+theme_light()
-g8<-c_data%>%ggplot(aes(x=HWAV_HLRA))+geom_histogram(bins=20)+theme_light()
-g9<-c_data%>%ggplot(aes(x=LTNG_EVNTS))+geom_histogram(bins=20)+theme_light()
 g10<-c_data%>%ggplot(aes(x=LTNG_AFREQ))+geom_histogram(bins=20)+theme_light()
-g11<-c_data%>%ggplot(aes(x=SWND_EVNTS))+geom_histogram(bins=20)+theme_light()
-g12<-c_data%>%ggplot(aes(x=SWND_AFREQ))+geom_histogram(bins=30)+theme_light()
-g13<-c_data%>%ggplot(aes(x=SWND_HLRA))+geom_histogram(bins=20)+theme_light()
 g14<-c_data%>%ggplot(aes(x=WFIR_AFREQ))+geom_histogram(bins=20)+theme_light()
-g15<-c_data%>%ggplot(aes(x=WFIR_EXPA))+geom_histogram(bins=20)+theme_light()
-g16<-c_data%>%ggplot(aes(x=WFIR_EXPT))+geom_histogram(bins=20)+theme_light()
-g17<-c_data%>%ggplot(aes(x=WFIR_EXP_AREA))+geom_histogram(bins=20)+theme_light()
-g18<-c_data%>%ggplot(aes(x=WFIR_HLRP))+geom_histogram(bins=30)+theme_light()
-g19<-c_data%>%ggplot(aes(x=WFIR_HLRA))+geom_histogram(bins=20)+theme_light()
-g20<-c_data%>%ggplot(aes(x=WFIR_EALT))+geom_histogram(bins=20)+theme_light()
-g21<-c_data%>%ggplot(aes(x=WFIR_EALS))+geom_histogram(bins=20)+theme_light()
 g22<-c_data%>%ggplot(aes(x=WFIR_ALRA))+geom_histogram(bins=20)+theme_light()
-g23<-c_data%>%ggplot(aes(x=TRCT_WAREA))+geom_histogram(bins=20)+theme_light()
-g24<-c_data%>%ggplot(aes(x=TRCT_SLOPE))+geom_histogram(bins=30)+theme_light()
-g25<-c_data%>%ggplot(aes(x=CNTY_ELEV))+geom_histogram(bins=20)+theme_light()
-g26<-c_data%>%ggplot(aes(x=CNTY_TEMP))+geom_histogram(bins=20)+theme_light()
-g27<-c_data%>%ggplot(aes(x=CNTY_PRECIP))+geom_histogram(bins=20)+theme_light()
 
 #Plot for project write up, only a selected few
 plt1<-ggarrange(g1,g2,g3,g4,g14,g22,g10,g7,nrow =4,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
@@ -99,69 +80,107 @@ c_data<-c_data%>%select(-c("TRCT_VEGLF"))
 
 
 #Seeing if there's multi-collinearity in the current predictors
-#Drought events and drought frequency are highly correlated, Let's see with variable selection if one of the variables is dropped from the optimized predictor set
+#Drought events and drought frequency highly correlated, Let's see with variable selection if one of the variables is dropped from the optimized predictor set
 temp<-c_data%>%select(-c("WFRI_R","TRACTFIPS"))
 temp<-cor(temp)
 
 #setting the binary response and a few predictor variables as a factor before modeling
 c_data<-c_data%>%mutate_at(c('WFRI_R',".isShrub",".isTree",".isDeveloped",".isHerb",".isArgiculture",".isSparse",".isBarren",".isSnowIce"),as.factor)
 
+#Checking if data set is imbalanced. Dataset will need to handle imbalance
+c_data%>%ggplot(aes(fill=WFRI_R))+geom_bar(aes(x=WFRI_R))+labs(title="WildFire Cases in the Data Set",x="WildFire Presence")
+
+#Downsampling the non wildfire cases so the models can predict more fire cases
+dwn_data<-downSample(x=c_data[,-ncol(c_data)],y=c_data$WFRI_R)
+
+#Seeing new distribution
+dwn_data%>%ggplot(aes(fill=WFRI_R))+geom_bar(aes(x=WFRI_R))+labs(title="WildFire Cases in the Data Set",x="WildFire Presence")
+
 #splitting data set into testing and training
-temp<-sample.split(c_data$WFRI_R,SplitRatio = 0.8)
-training_data<-subset(c_data,temp==TRUE)
-test_data<-subset(c_data,temp==FALSE)
+temp<-sample.split(dwn_data$WFRI_R,SplitRatio = 0.7)
+training_data<-subset(dwn_data,temp==TRUE)
+test_data<-subset(dwn_data,temp==FALSE)
 
 ```
 
 ```{r}
 ### Model Exploration
 
-#Using H2o package for all models tested as the package offers multiple models and other features for validation
+#Using H2o package for all models tested as package offers multiple models and other features for validation
 #connection to h20 server
 h2o.init()
 
-#Uploading the data set into h2o and splitting the dataset into training/test. Choosing an 80/20 split
+#Uploading the data set into h2o and splitting the dataset into training/test. Choosing a 70/30 split and splitting testing for a validation test
 train.h2o<-as.h2o(training_data)
 test.h2o<-as.h2o(test_data)
+test.splits<-h2o.splitFrame(test.h2o,ratios = .50,seed=3)
+t.h2o<-test.splits[[1]]
+v.h2o<-test.splits[[2]]
 
 #Model 1 Random Forest
 #random forest- (like a decision tree, a collection of DTs with random subsets of the training set)
-#suspect RF has better scores with sensitivity with the randomly selected features from each tree subset
+#suspect RF have better scores with sensitivity with the randomly select features from each tree subset
 
-#As RF will handle feature selection with its random subset. Removing drg_events to prevent multi-collinearity in the model
-features<-c("POPULATION","AREA","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_AFREQ","WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA","WFIR_HLRP","WFIR_HLRA","WFIR_EALT","WFIR_EALS","WFIR_ALRA","TRCT_WAREA","TRCT_SLOPE","CNTY_ELEV","CNTY_TEMP","CNTY_PRECIP",".isShrub",".isTree",".isDeveloped",".isHerb",".isSparse",".isBarren",".isSnowIce")
+#As RF will handle feature selection with its random subset
+features<-c("POPULATION","AREA","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_AFREQ","WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA","WFIR_HLRP","WFIR_HLRA","TRCT_WAREA","TRCT_SLOPE","CNTY_ELEV","CNTY_TEMP","CNTY_PRECIP",".isShrub",".isTree",".isDeveloped",".isHerb",".isSparse",".isBarren")
 response<-c("WFRI_R")
 
-#creating RF model from the training set, setting up rf to have K cross-validation of 10
-#Also included a stopping metric to be AUC measurement, It will cut to the most optimal level of trees based on the AUC score. Set ntrees at >300 to give as many trees before its cut-off
-rf.model<-h2o.randomForest(x=features,y=response,training_frame = train.h2o,nfolds=10,stopping_metric = "AUC",ntrees=333,seed=333)
+#creating RF model from the training set, 
+#Also included a stopping metric to be AUC measurement, It will cut to the most optimal level of trees based on the AUC score.Set ntrees at >200 to give as many trees before its cut off
+#adding in a validation set for determining accuracy in training the model
+rf.model<-h2o.randomForest(x=features,y=response,training_frame = train.h2o,validation_frame = v.h2o,ntrees=333,stopping_rounds = 3,stopping_tolerance = 0.001,stopping_metric = "AUC",score_tree_interval = 33 ,seed = 3)
 
-#retrieve current model statistics from the training set
-rf.tresults<-rf.model@model$cross_validation_metrics_summary%>%select(c("mean","sd"))%>%t()
 
 #using the rf model, see the performance on the test data set
-#Accuracy 99%, R^2=97%, MSE=0.003
-rf.score<-h2o.performance(rf.model,test.h2o)
+#Accuracy 99%, R^2=90%, MSE=0.003
+rf.score<-h2o.performance(rf.model,t.h2o)
 
-#Printing out results from the first model and storing ROC Curve
+
+#Printing out results from first model and storing ROC Curve
 rf.score
 rf.roc<-rf.score@metrics$thresholds_and_metric_scores
 rf.roc<-rf.roc%>%select(tpr,fpr)%>%ggplot(aes(x=fpr,y=tpr))+geom_point(color="black",size=0.5)+geom_segment(aes(x=0,y=0,xend=1,yend=1),linetype="dotted",color="red")+labs(x="Specificty",y="sensitivity",title = "Random Forest ROC Curve")+theme_light()
 
+
+rf.teststats<-data.frame(
+  r2<-c(rf.score@metrics$r2),
+  mse<-c(rf.score@metrics$MSE),
+  rsme<-c(rf.score@metrics$RMSE),
+  logloss<-c(rf.score@metrics$logloss),
+  auc<-c(rf.score@metrics$AUC),
+  accuarcy<-c(mean(rf.score@metrics$thresholds_and_metric_scores$accuracy)),
+  precisn<-c(mean(rf.score@metrics$thresholds_and_metric_scores$precision)),
+  recall<-c(mean(rf.score@metrics$thresholds_and_metric_scores$recall)),
+  specificity<-c(mean(rf.score@metrics$thresholds_and_metric_scores$specificity))
+)
+
 #review the feature importance of this random forest model
 rf.features<-h2o.varimp(rf.model)
   
-#Model 2 Ada Boosted Decision Tree Model
+#Model 2 Gradient Boosting Decision Tree Model
+
+#GB Modeling is additive leaf for the weighting in the predictors based previous tree leaves
+#It's basing it's weighting on the previous tree's errors to create smaller trees
+#New addition, there's a scaling effect
+gb_model<-h2o.gbm(x=features,y=response,training_frame = train.h2o,validation_frame = v.h2o,learn_rate = 0.01,ntrees=333,stopping_rounds = 3,stopping_tolerance = 0.001,stopping_metric = "AUC", score_tree_interval = 10,seed=3)
+
+gb.score<-h2o.performance(gb_model,t.h2o)
+gb.roc<-gb.score@metrics$thresholds_and_metric_scores
+gb.roc<-gb.roc%>%select(tpr,fpr)%>%ggplot(aes(x=fpr,y=tpr))+geom_point(color="black",size=0.5)+geom_segment(aes(x=0,y=0,xend=1,yend=1),linetype="dotted",color="red")+labs(x="Specificty",y="sensitivity",title = "Random Forest ROC Curve")+theme_light()
+
+#grabbing test results from Gradient Boosted model
+rf.teststats<-data.frame(
+  r2<-c(h2o.r2(gb.score)),
+  mse<-c(h2o.mse(gb.score)),
+  rmse<-c(h2o.rmse(gb.score)),
+  logloss<-c(h2o.logloss(gb.score)),
+  auc<-c(h2o.auc(gb.score)),
+  accuarcy<-c(mean(gb.score@metrics$thresholds_and_metric_scores$accuracy)),
+  precisn<-c(mean(gb.score@metrics$thresholds_and_metric_scores$precision)),
+  recall<-c(mean(gb.score@metrics$thresholds_and_metric_scores$recall)),
+  specificity<-c(mean(gb.score@metrics$thresholds_and_metric_scores$specificity))
+)
+
 ```
 
-```{r}
-### Data Analysis
 
-
-#remembering all models are predictions of a logistic regression
-#measurement of accuracy is different. Using McFadden's R^2 for measurement of fit and cross validation-Fit measurement, Error- AUC Curve
-#We care about TP identifying correctly- Heavy on precision, Classification error, Accuracy
-#second class- sensitivity, Specificity 
-
-
-```
