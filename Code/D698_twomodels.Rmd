@@ -1,0 +1,272 @@
+---
+title: "D698 Final Project"
+author: "Coffy Andrews-Guo, Vyanna Hill"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r}
+library(tidyverse)
+library(MLmetrics)
+library(ggpubr)
+library(caret)
+library(pROC) 
+library(caTools)
+library(h2o)
+### Data Exploration
+cali_data<-read_csv("C:/Users/walki/Documents/GitHub/D698/nri_cali.csv")
+
+#Removing non important columns
+#Note: WFIR_RISKS AND WFIR_RISV holds actual percentages of the likelihood, cannot be included as predictor value 
+c_data<-cali_data%>%select(-c("...1","WFIR_RISKV","WFIR_RISKS","WFIR_HLRB"))
+
+#Looking at the summary of all variables in the data set
+summary(c_data)
+
+#checking for null values
+colSums(is.na(c_data))
+
+#Reviewing the current distribution of the predictor values. See if there's future transformations
+g1<-c_data%>%ggplot(aes(x=POPULATION))+geom_histogram(bins=20)+theme_light()
+g2<-c_data%>%ggplot(aes(x=AREA))+geom_histogram(bins=20)+theme_light()
+g3<-c_data%>%ggplot(aes(x=DRGT_EVNTS))+geom_histogram(bins=20)+theme_light()
+g4<-c_data%>%ggplot(aes(x=DRGT_AFREQ))+geom_histogram(bins=20)+theme_light()
+g7<-c_data%>%ggplot(aes(x=HWAV_AFREQ))+geom_histogram(bins=20)+theme_light()
+g10<-c_data%>%ggplot(aes(x=LTNG_AFREQ))+geom_histogram(bins=20)+theme_light()
+g14<-c_data%>%ggplot(aes(x=WFIR_AFREQ))+geom_histogram(bins=20)+theme_light()
+g22<-c_data%>%ggplot(aes(x=WFIR_ALRA))+geom_histogram(bins=20)+theme_light()
+
+#Plot for project write up, only a selected few
+plt1<-ggarrange(g1,g2,g3,g4,g14,g22,g10,g7,nrow =4,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
+
+annotate_figure(plt1,top = text_grob("Distribution of Selected WildFire Predictor variables ",size=9))
+
+#From distribution plots, wildfire values is most skewed. may need additional support in transformations
+
+#Reviewing a few variables on its boxplots in reflection with the response variable WFRI_R
+g1<-c_data%>%ggplot(aes(y=TRCT_SLOPE,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Tract Slope")
+g2<-c_data%>%ggplot(aes(y=WFIR_HLRA,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="WildFire Histortic Argiculture Loss Ratio")
+g3<-c_data%>%ggplot(aes(y=CNTY_PRECIP,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual County Precipitation")
+g4<-c_data%>%ggplot(aes(y=LTNG_EVNTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Lighting Events")
+
+plt1<-ggarrange(g1,g2,g3,g4,nrow =2,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
+
+annotate_figure(plt1,top = text_grob("Difference in Summary Statistics With Wildfire presence",size=9))
+
+
+```
+
+```{r}
+### Data Preparation 
+
+#transforming the tract vegetation life into binary dummy variables via mutate
+unique(c_data$TRCT_VEGLF)
+c_data<-c_data%>%mutate(.isShrub=if_else(TRCT_VEGLF=="Shrub",1,0),
+                        .isTree=if_else(TRCT_VEGLF=="Tree",1,0),
+                        .isDeveloped=if_else(TRCT_VEGLF=="Developed",1,0),
+                        .isHerb=if_else(TRCT_VEGLF=="Herb",1,0),
+                        .isArgiculture=if_else(TRCT_VEGLF=="Argiculture",1,0),
+                        .isSparse=if_else(TRCT_VEGLF=="Sparse",1,0),
+                        .isBarren=if_else(TRCT_VEGLF=="Barren",1,0),
+                        .isSnowIce=if_else(TRCT_VEGLF=="Snow-Ice",1,0),
+                        )
+c_data<-c_data%>%select(-c("TRCT_VEGLF"))
+
+
+#Seeing if there's multi-collinearity in the current predictors
+#Drought events and drought frequency highly correlated, Let's see with variable selection if one of the variables is dropped from the optimized predictor set
+temp<-c_data%>%select(-c("WFRI_R","TRACTFIPS"))
+temp<-cor(temp)
+
+#setting the binary response and a few predictor variables as a factor before modeling
+c_data<-c_data%>%mutate_at(c('WFRI_R',".isShrub",".isTree",".isDeveloped",".isHerb",".isArgiculture",".isSparse",".isBarren",".isSnowIce"),as.factor)
+
+#Checking if data set is imbalanced. Dataset will need to handle imbalance
+c_data%>%ggplot(aes(fill=WFRI_R))+geom_bar(aes(x=WFRI_R))+labs(title="WildFire Cases in the Data Set",x="WildFire Presence")
+
+#Downsampling the non wildfire cases so the models can predict more fire cases
+dwn_data<-downSample(x=c_data[,-ncol(c_data)],y=c_data$WFRI_R)
+
+#Seeing new distribution
+dwn_data%>%ggplot(aes(fill=WFRI_R))+geom_bar(aes(x=WFRI_R))+labs(title="WildFire Cases in the Data Set",x="WildFire Presence")
+
+#splitting data set into testing and training
+temp<-sample.split(dwn_data$WFRI_R,SplitRatio = 0.7)
+training_data<-subset(dwn_data,temp==TRUE)
+test_data<-subset(dwn_data,temp==FALSE)
+
+```
+
+```{r}
+### Model Exploration
+
+#Using H2o package for all models tested as package offers multiple models and other features for validation
+#connection to h20 server
+h2o.init()
+
+#Uploading the data set into h2o and splitting the data set into training/test. Choosing a 70/30 split and splitting testing for a validation test
+train.h2o<-as.h2o(training_data)
+test.h2o<-as.h2o(test_data)
+test.splits<-h2o.splitFrame(test.h2o,ratios = .50,seed=3)
+# t.h2o<-test.splits[[1]]
+# v.h2o<-test.splits[[2]]
+
+#Model 1 Random Forest
+#random forest- (like a decision tree, a collection of DTs with random subsets of the training set)
+#suspect RF have better scores with sensitivity with the randomly select features from each tree subset
+
+#As RF will handle feature selection with its random subset
+#remove wildfire exposure as it possible can affect AUC (,"WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA")
+
+features<-c("POPULATION","AREA","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_AFREQ","WFIR_HLRP","WFIR_HLRA","TRCT_WAREA","TRCT_SLOPE","CNTY_ELEV","CNTY_TEMP","CNTY_PRECIP",".isShrub",".isTree",".isDeveloped",".isHerb",".isSparse",".isBarren")
+response<-c("WFRI_R")
+
+#creating RF model from the training set. Two versions
+#A stopping metric to stop creating more trees after the logloss gets worse and include some cross validation
+
+# rf.model<-h2o.randomForest(x=features,y=response,training_frame = train.h2o,stopping_rounds = 3,stopping_tolerance = 0.001,stopping_metric = "logloss",balance_classes = FALSE, nfolds = 5,seed=3)
+
+rf.model<-h2o.randomForest(x = features, y =response , training_frame = train.h2o, stopping_rounds = 5,stopping_tolerance = 0.001, stopping_metric = "logloss", seed = 3, balance_classes = FALSE, nfolds = 5,score_tree_interval=10)
+
+#review the feature importance of this random forest model and using the highest coefficients in the final model
+rf.features<-h2o.varimp(rf.model)
+features_v2<-rf.features$variable[1:10]%>%as.vector()
+
+
+#see first version tree structure
+rf.model@model$model_summary
+
+#look at cross validation results from the model
+rf.cross<-rf.model@model$cross_validation_metrics_summary%>%select(-c(mean,sd))
+
+#see V2 of model with high importance variables, tweaking the max depth and trees to see if AUC is affected by possible overfitting. If affect, AUC should drop as less trees are created
+rf.v2<-h2o.randomForest(x = features_v2, y =response , training_frame = train.h2o, stopping_rounds = 5,stopping_tolerance = 0.01, stopping_metric = "logloss", seed = 3, balance_classes = FALSE, nfolds = 10,score_tree_interval=10,max_depth=5,ntrees=25,min_rows = 20)
+          
+#using the rf model, see how well the rf model predicts response
+rf.pred<-h2o.predict(rf.model,test.h2o)%>%as.data.frame()%>%pull(predict)
+rf.precsnprob<-h2o.predict(rf.model,test.h2o)%>%as.data.frame()%>%pull(p1)
+rf.reclprob<-h2o.predict(rf.model,test.h2o)%>%as.data.frame()%>%pull(p0)
+
+#Print the confusion matrix
+#Sensitivity is high, good for our model but Specificity is lower
+#accuracy, precision, recall, and F1 score items to compare from training
+rf.con<-confusionMatrix(rf.pred,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+#creating a reference table w/ predicted probabilities, actual, and predictions all in one
+#see summary results of random forest model on the test data
+rf.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-rf.pred,
+      N<-rf.reclprob,
+      Y<-rf.precsnprob
+  )
+
+rf.summary<-rf.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....rf.pred", N="N....rf.reclprob", Y="Y....rf.precsnprob")
+
+#Retrieving Testing results after making predictions with rf.model
+rf.auc<-roc(rf.summary$obs,Y)
+
+
+test.results<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(rf.summary$pred)),y_true =as.numeric(as.character( rf.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(rf.summary$pred)),as.numeric(as.character(rf.summary$obs))),
+  t.RSME<-RMSE(as.numeric(as.character(rf.summary$pred)),as.numeric(as.character(rf.summary$obs))),
+  t.AUC<-rf.auc$auc,
+  t.ClassError<-mean(rf.summary$pred!=rf.summary$obs)
+  
+)
+
+test.results<-test.results%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.rf.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.rf.summary.pred....as.numeric.as.character.rf.summary.obs..."  
+,RMSE="t.RSME....RMSE.as.numeric.as.character.rf.summary.pred....as.numeric.as.character.rf.summary.obs..."
+,AUC="t.AUC....rf.auc.auc",classError="t.ClassError....mean.rf.summary.pred....rf.summary.obs.")
+
+
+
+#plotting ROC curve of Random Forest
+ggroc(rf.auc)+ggtitle("Random Forest ROC Curve of AUC= 0.9891")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+
+
+
+
+
+# #Printing out results from first model and storing ROC Curve
+# rf.score
+# rf.roc<-rf.score@metrics$thresholds_and_metric_scores
+# rf.roc<-rf.roc%>%select(tpr,fpr)%>%ggplot(aes(x=fpr,y=tpr))+geom_point(color="black",size=0.5)+geom_segment(aes(x=0,y=0,xend=1,yend=1),linetype="dotted",color="red")+labs(x="Specificty",y="sensitivity",title = "Random Forest ROC Curve")+theme_light()
+
+
+  
+#Model 2 Gradient Boosting Decision Tree Model
+
+#GB Modeling is additive leaf for the weighting in the predictors based previous tree leaves
+#It's basing it's weighting on the previous tree's errors to create smaller trees
+#New addition, there's a scaling effect
+gb_model<-h2o.gbm(x=features,y=response,training_frame = train.h2o,learn_rate = 0.1,ntrees=1000,stopping_rounds = 3,stopping_tolerance = 0.001,stopping_metric = "auc", score_tree_interval = 5,nfolds=5,seed=3)
+
+#Feature importance for gb_model
+gb.features<-h2o.varimp(gb_model)
+features_v2<-gb.features$variable[1:10]%>%as.vector()
+
+#see first version tree structure
+gb_model@model$model_summary
+gb.cross<-gb_model@model$cross_validation_metrics_summary%>%select(-c(mean,sd))
+
+
+#optimizing the regression model with high importance features, smaller tree size than the previous number of tree, lowering stopping rounds for quicker review
+gb_v2<-h2o.gbm(x=features_v2,y=response,training_frame = train.h2o,learn_rate = 0.1,ntrees=45,stopping_rounds = 2,stopping_tolerance = 0.001,stopping_metric = "auc", score_tree_interval = 5,nfolds=5,seed=3)
+
+
+#see performance of prediction
+gb.pred<-h2o.predict(gb_v2,test.h2o)%>%as.data.frame()%>%pull(predict)
+gb.precsnprob<-h2o.predict(gb_v2,test.h2o)%>%as.data.frame()%>%pull(p1)
+gb.reclprob<-h2o.predict(gb_v2,test.h2o)%>%as.data.frame()%>%pull(p0)
+
+#Print the confusion matrix
+gb.con<-confusionMatrix(gb.pred,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+#see summary results of random forest model on the test data
+gb.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-gb.pred,
+      N<-gb.reclprob,
+      Y<-gb.precsnprob
+  )
+
+gb.summary<-gb.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....gb.pred", N="N....gb.reclprob", Y="Y....gb.precsnprob")
+
+#Retrieving Testing results after making predictions with gb.model
+gb.auc<-roc(gb.summary$obs,Y)
+
+
+test.results<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(gb.summary$pred)),y_true =as.numeric(as.character( gb.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(gb.summary$pred)),as.numeric(as.character(gb.summary$obs))),
+  t.RSME<-RMSE(as.numeric(as.character(gb.summary$pred)),as.numeric(as.character(gb.summary$obs))),
+  t.AUC<-gb.auc$auc,
+  t.ClassError<-mean(gb.summary$pred!=gb.summary$obs)
+  
+)
+
+test.results<-test.results%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.gb.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.gb.summary.pred....as.numeric.as.character.gb.summary.obs..."  
+,RMSE="t.RSME....RMSE.as.numeric.as.character.gb.summary.pred....as.numeric.as.character.gb.summary.obs..."
+,AUC="t.AUC....gb.auc.auc",classError="t.ClassError....mean.gb.summary.pred....gb.summary.obs.")
+
+
+
+#plotting ROC curve of Random Forest
+ggroc(gb.auc)+ggtitle("Random Forest ROC Curve of AUC= 0.9891")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+
+
+
+
+
+
+```
+
