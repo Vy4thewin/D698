@@ -160,11 +160,11 @@ colSums(is.na(c_data))
 g1<-c_data%>%ggplot(aes(x=POPULATION))+geom_histogram(bins=20)+theme_light()
 g2<-c_data%>%ggplot(aes(x=AREA))+geom_histogram(bins=20)+theme_light()
 g3<-c_data%>%ggplot(aes(x=DRGT_EVNTS))+geom_histogram(bins=20)+theme_light()
-g4<-c_data%>%ggplot(aes(x=DRGT_AFREQ))+geom_histogram(bins=20)+theme_light()
-g7<-c_data%>%ggplot(aes(x=HWAV_AFREQ))+geom_histogram(bins=20)+theme_light()
-g10<-c_data%>%ggplot(aes(x=LTNG_AFREQ))+geom_histogram(bins=20)+theme_light()
-g14<-c_data%>%ggplot(aes(x=WFIR_AFREQ))+geom_histogram(bins=20)+theme_light()
-g22<-c_data%>%ggplot(aes(x=WFIR_ALRA))+geom_histogram(bins=20)+theme_light()
+g4<-c_data%>%ggplot(aes(x=HWAV_AFREQ))+geom_histogram(bins=20)+theme_light()
+g7<-c_data%>%ggplot(aes(x=WFIR_AFREQ))+geom_histogram(bins=20)+theme_light()
+g10<-c_data%>%ggplot(aes(x=WFIR_ALRA))+geom_histogram(bins=20)+theme_light()
+g14<-c_data%>%ggplot(aes(x=LTNG_AFREQ))+geom_histogram(bins=20)+theme_light()
+g22<-c_data%>%ggplot(aes(x=SWND_AFREQ))+geom_histogram(bins=20)+theme_light()
 ```
 
 #Plot for project write up, only a selected few
@@ -177,7 +177,7 @@ annotate_figure(plt1,top = text_grob("Distribution of Selected WildFire Predicto
 #Reviewing a few variables on its boxplots in reflection with the response variable WFRI_R
 ```{r}
 g1<-c_data%>%ggplot(aes(y=TRCT_SLOPE,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Tract Slope")
-g2<-c_data%>%ggplot(aes(y=WFIR_HLRA,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="WildFire Histortic Argiculture Loss Ratio")
+g2<-c_data%>%ggplot(aes(y=SWND_EVENTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Strong Wind Events")
 g3<-c_data%>%ggplot(aes(y=CNTY_PRECIP,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual County Precipitation")
 g4<-c_data%>%ggplot(aes(y=LTNG_EVNTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Lighting Events")
 
