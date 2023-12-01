@@ -1,0 +1,1257 @@
+---
+title: "D698 Final Project"
+author: "Coffy Andrews-Guo, Vyanna Hill"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r warning=FALSE}
+#Packages used
+library(tidyverse)
+library(MLmetrics)
+library(ggpubr)
+library(caret)
+library(pROC) 
+library(caTools)
+library(h2o)
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#Pre-Processing
+library(tidyverse)
+library(mice)
+```
+
+
+#Uploading data sets for combination
+```{r eval = FALSE}
+elevation<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/USGS_CACounties_elevation_2023 (1).csv")
+slope<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/SlopePercentage_Calitracts_LF2020.csv")
+whp<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/WHP2020_ZipCode_Summary - zipcode_summary.csv")
+
+weather<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/NOAA_CACounties_AverageTemp_2022.csv")
+rainfall<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/NOAA_CACounties_AveragePercipitation_2022.csv")
+
+LF_Vegdictonary<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/LF22_EVT_230 - LF22_EVT_230.csv.csv")
+cali_vegtype<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/CalifornianTracts_VegType_2022LF - test.csv.csv")
+#combining the weather data set first as both on the county lvl. Only want the averages of the year
+cali_cweather<-weather%>%left_join(rainfall,by=join_by(ID))
+cali_cweather<-cali_cweather%>%select(-c("Rank.x","Anomaly (1901-2000 base period).x","1901-2000 Mean.x","Name.y","State.y","Rank.y","Anomaly (1901-2000 base period).y","1901-2000 Mean.y"))
+cali_cweather<-cali_cweather%>%rename(county_Id=ID,county_name=Name.x,State=State.x,avg_tempeture=Value.x,avg_precipitation=Value.y)
+```
+
+#onto topographic data, will need to combine by county and lat/long(if possible)
+#Need the county ID in Slope data for left combine with elevation
+```{r eval=FALSE}
+cali_topography<-slope%>%unite("countyID",1:2,remove = FALSE,sep = "")
+```
+
+#14 rows missing slope data, can be zero slope but using mice for imputation
+```{r eval=FALSE}
+cali_topography<-cali_topography%>%rename(tract_avgSlope="_mean",tract_countSlope="_count",tract_maxSlope="_max")
+cali_topography<-complete(mice(cali_topography,method = "cart",seed = 333))
+
+elevation<-elevation%>%rename(countyID="County FIPS Code")
+```
+
+#mapping the tract data in topography by county ID and the closest match by Longitude
+```{r eval=FALSE}
+cali_topography<-cali_topography%>%inner_join(elevation,by=join_by(countyID,closest(INTPTLON<=Longitude)))
+```
+
+#removing unnecessary metrics and renaming columns for readability
+```{r eval=FALSE}
+cali_topography<-cali_topography%>%select(-c("Latitude","Longitude","Bgn Decision Date","Entry Date","Census Code","Census Classification Code","GSA Code","OPM Code","State FIPS Code","Map","State","Class","tract_maxSlope","Gaz ID","Feature Name","tract_countSlope","MTFCC","FUNCSTAT"))
+cali_topography<-cali_topography%>%rename(tractID=NAME,land_Area=ALAND,water_Area=AWATER,latitude=INTPTLAT,longitude=INTPTLON,county_avgElevation=Elevation)
+```
+
+#Using LandFire's vegetation type dictionary to map tract's average vegetation type
+#Filtering for CA tracts only
+```{r eval=FALSE}
+cali_vegetation<-cali_vegtype%>%filter(STUSPS=="CA")
+lf_small<-LF_Vegdictonary%>%select("VALUE","EVT_NAME","EVT_LF","EVT_CLASS")
+cali_vegetation<-cali_vegetation%>%left_join(lf_small,by=join_by(closest("_mean">=VALUE)))
+```
+
+#Cleaning up new data set
+```{r eval=FALSE}
+cali_vegetation<-cali_vegetation%>%select(-c("STATEFP","COUNTYFP","TRACTCE","AFFGEOID","NAME","NAMELSAD","STUSPS","NAMELSADCO","STATE_NAME","LSAD","ALAND","AWATER","_count","_sum","_mean","VALUE","EVT_NAME","EVT_CLASS"))
+```
+
+#Combing weather, topography, and vegetation
+```{r eval=FALSE}
+cali_features<-cali_topography%>%left_join(cali_cweather,by=join_by(County==county_name))
+cali_features<-cali_features%>%select(-c("county_Id","State"))
+cali_vegetation<-cali_vegetation%>% mutate(GEOID = paste("0", GEOID, sep = ""))
+```
+
+#Census Tract 9901 does not have vegetation as it is the shoreline, replacing NAs with Water
+```{r eval=FALSE}
+cali_features<-cali_features%>%left_join(cali_vegetation,by=join_by(GEOID))
+cali_features<-cali_features%>%mutate(EVT_LF=replace_na(EVT_LF,"Water"))
+```
+
+#saving export
+```{r eval=FALSE}
+write.csv(cali_features,"caliTracts_features.csv")
+```
+
+#Reducing predictors from NRI before the combination
+```{r eval=FALSE}
+nri_data<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/NRI_Table_CensusTracts_Subset.csv")
+nri<-nri_data%>%select("STATE","STATEABBRV","STATEFIPS","COUNTY","COUNTYTYPE","COUNTYFIPS","STCOFIPS","TRACT","TRACTFIPS","POPULATION","AREA","DRGT_EVNTS","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_EVNTS","WFIR_AFREQ","WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA","WFIR_HLRB","WFIR_HLRP","WFIR_HLRA","WFIR_HLRR","WFIR_EALT","WFIR_EALS","WFIR_EALR","WFIR_ALRA","WFIR_RISKV","WFIR_RISKS","WFIR_RISKR")
+```
+
+#only CA cases, converting categorical to binary
+```{r eval=FALSE}
+nri<-nri%>%filter(STATEABBRV=="CA")
+nri<-nri%>%mutate(WFRI_R=case_when(WFIR_RISKV<13000~0,WFIR_RISKV>13000~1))
+```
+
+#Removal of extra columns
+```{r eval=FALSE}
+nri<-nri%>%select(-c(WFIR_EVNTS,WFIR_HLRR,WFIR_EALR))
+```
+
+#combination of cali features
+```{r eval=FALSE}
+cali_features<-read_csv("C:/Users/walki/Documents/GitHub/D698/Datasets/caliTracts_features.csv")
+
+nri_cali<-nri%>%inner_join(cali_features,by=join_by(TRACTFIPS==GEOID))
+nri_cali<-nri_cali%>%select(-c(STATE,STATEABBRV,STATEFIPS,COUNTY,COUNTYTYPE,COUNTYFIPS,STCOFIPS,TRACT,...1,STATEFP,COUNTYFP,TRACTCE,tractID,NAMELSAD,land_Area,latitude,longitude,County,countyID))
+```
+
+#renaming columns for reference
+```{r eval=FALSE}
+nri_cali<-nri_cali%>%rename(TRCT_WAREA=water_Area,TRCT_SLOPE=tract_avgSlope,CNTY_ELEV=county_avgElevation,CNTY_TEMP=avg_tempeture,CNTY_PRECIP=avg_precipitation,TRCT_VEGLF=EVT_LF)
+
+write.csv(nri_cali,"nri_cali.csv")
+```
+
+###Data Exploration
+##using nri.cali Dataset
+```{r}
+cali_data<-read_csv("C:/Users/andre/Downloads/nri_cali.csv")
+```
+
+#Removing non important columns
+#Note: WFIR_RISKS AND WFIR_RISV holds actual percentages of the likelihood, cannot be included as predictor value 
+```{r}
+c_data<-cali_data%>%select(-c("...1","WFIR_RISKV","WFIR_RISKS","WFIR_HLRB"))
+```
+
+#Looking at the summary of all variables in the data set
+```{r}
+summary(c_data)
+```
+
+#checking for null values
+```{r}
+colSums(is.na(c_data))
+```
+
+#Reviewing the current distribution of the predictor values. See if there's future transformations
+```{r}
+g1<-c_data%>%ggplot(aes(x=POPULATION))+geom_histogram(bins=20)+theme_light()
+g2<-c_data%>%ggplot(aes(x=AREA))+geom_histogram(bins=20)+theme_light()
+g3<-c_data%>%ggplot(aes(x=DRGT_EVNTS))+geom_histogram(bins=20)+theme_light()
+g4<-c_data%>%ggplot(aes(x=HWAV_AFREQ))+geom_histogram(bins=20)+theme_light()
+g7<-c_data%>%ggplot(aes(x=WFIR_AFREQ))+geom_histogram(bins=20)+theme_light()
+g10<-c_data%>%ggplot(aes(x=WFIR_ALRA))+geom_histogram(bins=20)+theme_light()
+g14<-c_data%>%ggplot(aes(x=LTNG_AFREQ))+geom_histogram(bins=20)+theme_light()
+g22<-c_data%>%ggplot(aes(x=SWND_AFREQ))+geom_histogram(bins=20)+theme_light()
+```
+
+#Plot for project write up, only a selected few
+```{r}
+plt1<-ggarrange(g1,g2,g3,g4,g14,g22,g10,g7,nrow =4,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
+
+annotate_figure(plt1,top = text_grob("Distribution of Selected WildFire Predictor variables ",size=9))
+```
+
+#Reviewing a few variables on its boxplots in reflection with the response variable WFRI_R
+```{r}
+g1<-c_data%>%ggplot(aes(y=TRCT_SLOPE,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Tract Slope")
+g2<-c_data%>%ggplot(aes(y=SWND_EVNTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Strong Wind Events")
+g3<-c_data%>%ggplot(aes(y=CNTY_PRECIP,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual County Precipitation")
+g4<-c_data%>%ggplot(aes(y=LTNG_EVNTS,x=factor(WFRI_R)))+geom_boxplot()+theme_light()+labs(x="WildFire Present",y="Annual Lighting Events")
+
+plt1<-ggarrange(g1,g2,g3,g4,nrow =2,ncol =2,align="h",heights = 2,font.label = list(size =3, color = "black"))
+
+annotate_figure(plt1,top = text_grob("Difference in Summary Statistics With Wildfire presence",size=9))
+```
+
+#Checking if the data set is imbalanced
+```{r}
+c_data%>%ggplot(aes(fill=WFRI_R))+geom_bar(aes(x=WFRI_R))+labs(title="WildFire Cases in the Data Set",x="WildFire Presence")
+```
+
+###Data Preparation
+
+#transforming the tract vegetation life into binary dummy variables via mutate
+```{r}
+unique(c_data$TRCT_VEGLF)
+c_data<-c_data%>%mutate(.isShrub=if_else(TRCT_VEGLF=="Shrub",1,0),
+                        .isTree=if_else(TRCT_VEGLF=="Tree",1,0),
+                        .isDeveloped=if_else(TRCT_VEGLF=="Developed",1,0),
+                        .isHerb=if_else(TRCT_VEGLF=="Herb",1,0),
+                        .isArgiculture=if_else(TRCT_VEGLF=="Argiculture",1,0),
+                        .isSparse=if_else(TRCT_VEGLF=="Sparse",1,0),
+                        .isBarren=if_else(TRCT_VEGLF=="Barren",1,0),
+                        .isSnowIce=if_else(TRCT_VEGLF=="Snow-Ice",1,0),
+                        )
+c_data<-c_data%>%select(-c("TRCT_VEGLF"))
+```
+
+#Seeing if there's multi-collinearity in the current predictors
+#Drought events and drought frequency are highly correlated, Let's see with variable selection if one of the variables is dropped from the optimized predictor set
+```{r}
+temp<-c_data%>%select(-c("WFRI_R","TRACTFIPS"))
+temp<-cor(temp)
+```
+
+#setting the binary response and a few predictor variables as a factor before modeling
+```{r}
+c_data<-c_data%>%mutate_at(c('WFRI_R',".isShrub",".isTree",".isDeveloped",".isHerb",".isArgiculture",".isSparse",".isBarren",".isSnowIce"),as.factor)
+```
+
+#Downsampling the non wildfire cases so the models can predict more fire cases
+```{r}
+dwn_data<-downSample(x=c_data[,-ncol(c_data)],y=c_data$WFRI_R)
+```
+
+#Seeing new distribution
+```{r}
+dwn_data%>%ggplot(aes(fill=WFRI_R))+geom_bar(aes(x=WFRI_R))+labs(title="WildFire Cases in the Data Set",x="WildFire Presence")
+```
+
+#splitting data set into testing and training
+```{r}
+temp<-sample.split(dwn_data$WFRI_R,SplitRatio = 0.7)
+training_data<-subset(dwn_data,temp==TRUE)
+test_data<-subset(dwn_data,temp==FALSE)
+```
+
+```{r}
+names(test_data)
+```
+
+```{r}
+x_traindata <- setdiff(names(training_data), c("WFRI_R"))
+names(training_data)
+```
+
+
+
+### Data Analysis
+
+#connection to h20 server
+```{r}
+h2o.init()
+```
+
+#Uploading the data set into h2o and splitting the data set into training/test. Choosing a 70/30 split and splitting testing for a validation test
+```{r}
+train.h2o<-as.h2o(training_data)
+test.h2o<-as.h2o(test_data)
+```
+
+
+
+#Model 1| Random Forest
+
+```{r}
+#removed wildfire exposure features it's possibly tied to the  likelihood response(,"WFIR_EXPA","WFIR_EXPT","WFIR_EXP_AREA")
+features<-c("POPULATION","AREA","DRGT_AFREQ","DRGT_HLRA","HWAV_EVNTS","HWAV_AFREQ","HWAV_HLRA","LTNG_EVNTS","LTNG_AFREQ","SWND_EVNTS","SWND_AFREQ","SWND_HLRA","WFIR_AFREQ","WFIR_HLRP","WFIR_HLRA","TRCT_WAREA","TRCT_SLOPE","CNTY_ELEV","CNTY_TEMP","CNTY_PRECIP",".isShrub",".isTree",".isDeveloped",".isHerb",".isSparse",".isBarren")
+response<-c("WFRI_R")
+```
+
+
+##Version 1 of Random Forest
+```{r }
+#V1: Stopping metrics based on AUC score as preventing for overfitting and added Cross-validation with Nfolds
+rf.model<-h2o.randomForest(x = features, y =response , training_frame = train.h2o, stopping_rounds = 5,stopping_tolerance = 0.001, stopping_metric = "AUC", seed = 3, balance_classes = FALSE, nfolds = 5,score_tree_interval=10, keep_cross_validation_predictions = TRUE)
+```
+
+```{r eval=FALSE}
+#see the first version of the tree structure
+rf.model@model$model_summary
+```
+
+```{r eval=FALSE}
+#look at cross-validation results from the model, Not much difference between cases
+rf.cross<-rf.model@model$cross_validation_metrics_summary%>%select(-c(mean,sd))
+#rf.cross
+```
+
+
+
+```{r}
+#review the feature importance of this random forest model and using the highest gini indexes in the final model
+rf.features<-h2o.varimp(rf.model)
+features_v2<-rf.features$variable[1:10]%>%as.vector()
+```
+
+
+##Version 2| RF
+```{r}
+#Shortening max depth and trees for more conservative AUC. Applying highest gini index features to the model
+rf.v2<-h2o.randomForest(x = features_v2, y =response , training_frame = train.h2o, stopping_rounds = 5,stopping_tolerance = 0.01, stopping_metric = "AUC", seed = 3, balance_classes = FALSE, nfolds = 10,score_tree_interval=10,max_depth=5,ntrees=25,min_rows = 20, keep_cross_validation_predictions = TRUE)
+```
+
+### RF Verison 2 - Model Performance
+```{r RFModel2}
+rf2_perf <- h2o.performance(rf.v2, test.h2o)
+rf2_perf
+```
+
+
+```{r}
+rf2_pred <- h2o.predict(rf.v2,test.h2o)
+```
+
+```{r}
+pred1 <- as.data.frame(rf2_pred$predict)
+pred1$predict <- factor(pred1$predict, levels = c(0, 1))
+mean(pred1$predict==test_data$WFRI_R)
+```
+
+
+```{r eval=FALSE}
+#plotting logloss of the revised model
+plot(rf.v2)
+```
+
+### RF Version2 - Predictions
+```{r}
+#from the revised model, pull results from prediction against test set
+rf.pred<-h2o.predict(rf.v2,test.h2o)%>%as.data.frame()%>%pull(predict)
+rf.precsnprob<-h2o.predict(rf.v2,test.h2o)%>%as.data.frame()%>%pull(p1)
+rf.reclprob<-h2o.predict(rf.v2,test.h2o)%>%as.data.frame()%>%pull(p0)
+```
+
+### RF Version 2 - confusion matrix of rf predictions
+```{r}
+rf.con<-confusionMatrix(rf.pred,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+rf.con
+```
+
+### RF Version 2 - storing confusion matrix results
+```{r}
+confusionM<-rf.con$byClass%>%as.data.frame()%>%t()
+confusionM<-as.data.frame(confusionM)
+confusionM<-confusionM%>%rename(Pos_pred_value="Pos Pred Value",Neg_Pred_value="Neg Pred Value",Detection_rate="Detection Rate", Detection_prevalence="Detection Prevalence",Balanced_Accuracy="Balanced Accuracy")
+#confusionM
+```
+
+#creating a reference table w/ predicted probabilities, actual, and predictions all in one
+#see summary results of random forest model on the test data
+```{r}
+rf.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-rf.pred,
+      N<-rf.reclprob,
+      Y<-rf.precsnprob
+  )
+
+rf.summary<-rf.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....rf.pred", N="N....rf.reclprob", Y="Y....rf.precsnprob")
+
+rf.auc<-roc(rf.summary$obs,Y)
+
+test.results<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(rf.summary$pred)),y_true =as.numeric(as.character( rf.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(rf.summary$pred)),as.numeric(as.character(rf.summary$obs))),
+  t.RSME<-RMSE(as.numeric(as.character(rf.summary$pred)),as.numeric(as.character(rf.summary$obs))),
+  t.AUC<-rf.auc$auc,
+  t.ClassError<-mean(rf.summary$pred!=rf.summary$obs)
+  
+)
+```
+
+
+
+#Stores Test Performance of Models
+```{r}
+test.results<-test.results%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.rf.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.rf.summary.pred....as.numeric.as.character.rf.summary.obs...",RMSE="t.RSME....RMSE.as.numeric.as.character.rf.summary.pred....as.numeric.as.character.rf.summary.obs...",AUC="t.AUC....rf.auc.auc",classError="t.ClassError....mean.rf.summary.pred....rf.summary.obs.")
+test.results
+```
+
+#plotting ROC curve of Random Forest - Version 2
+```{r}
+ggroc(rf.auc)+ggtitle("Random Forest ROC Curve of AUC= 0.9891")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+```
+
+#Model 2| Gradient Boosting Decision Tree
+
+
+#Version 1| 
+#Higher learning rate, Stopping metric on AUC as logloss saw lower R^2, Cross-validation on training set
+```{r}
+gb_model<-h2o.gbm(x=features,y=response,training_frame = train.h2o,learn_rate = 0.1,ntrees=1000,stopping_rounds = 3,stopping_tolerance = 0.001,stopping_metric = "auc", score_tree_interval = 5,nfolds=5,seed=3)
+```
+
+#see the first version of the tree structure
+```{r eval=FALSE}
+gb_model@model$model_summary
+gb.cross<-gb_model@model$cross_validation_metrics_summary%>%select(-c(mean,sd))
+```
+
+
+
+#Feature importance for gb_model
+```{r}
+gb.features<-h2o.varimp(gb_model)
+features_v2<-gb.features$variable[1:10]%>%as.vector()
+```
+
+#Version 2
+#Lowering stopping rounds for a quicker review on the AUC score, Smaller tree size from v1
+```{r GBMModel2}
+gb_v2<-h2o.gbm(x=features_v2,y=response,training_frame = train.h2o,learn_rate = 0.1,ntrees=45,stopping_rounds = 2,stopping_tolerance = 0.001,stopping_metric = "auc", score_tree_interval = 5,nfolds=5,seed=3)
+```               
+
+#see performance of prediction
+```{r}
+gb.pred<-h2o.predict(gb_v2,test.h2o)%>%as.data.frame()%>%pull(predict)
+gb.precsnprob<-h2o.predict(gb_v2,test.h2o)%>%as.data.frame()%>%pull(p1)
+gb.reclprob<-h2o.predict(gb_v2,test.h2o)%>%as.data.frame()%>%pull(p0)
+```
+
+#Print the confusion matrix
+```{r}
+gb.con<-confusionMatrix(gb.pred,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+gb.con
+```
+
+#see summary results of random forest model on the test data
+```{r}
+gb.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-gb.pred,
+      N<-gb.reclprob,
+      Y<-gb.precsnprob
+  )
+
+gb.summary<-gb.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....gb.pred", N="N....gb.reclprob", Y="Y....gb.precsnprob")
+
+gb.auc<-roc(gb.summary$obs,Y)
+
+
+temp<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(gb.summary$pred)),y_true =as.numeric(as.character( gb.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(gb.summary$pred)),as.numeric(as.character(gb.summary$obs))),
+  t.RSME<-RMSE(as.numeric(as.character(gb.summary$pred)),as.numeric(as.character(gb.summary$obs))),
+  t.AUC<-gb.auc$auc,
+  t.ClassError<-mean(gb.summary$pred!=gb.summary$obs)
+  
+)
+```
+
+
+
+#plotting ROC curve of gradient boosted DT
+```{r}
+ggroc(gb.auc)+ggtitle("Gradient Boosted Decision Tree ROC Curve of AUC= 0.9871")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+
+
+temp<-temp%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.gb.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.gb.summary.pred....as.numeric.as.character.gb.summary.obs..."  
+,RMSE="t.RSME....RMSE.as.numeric.as.character.gb.summary.pred....as.numeric.as.character.gb.summary.obs..."
+,AUC="t.AUC....gb.auc.auc",classError="t.ClassError....mean.gb.summary.pred....gb.summary.obs.")
+```
+
+#adding gradient boosting to the results data frame
+```{r}
+test.results[2,]<-c(R2=temp$R2,MSE=temp$MSE,RMSE=temp$RMSE,AUC=temp$AUC,classError=temp$classError)
+rownames(test.results)<-c("Random Forest","Gradient Boosting")
+```
+
+#storing confusion matrix testing results
+```{r}
+temp<-gb.con$byClass%>%as.data.frame()%>%t()
+temp<-as.data.frame(temp)
+
+confusionM<-confusionM%>%add_row(Sensitivity= temp$Sensitivity,Specificity=temp$Specificity, Pos_pred_value=temp$`Pos Pred Value`,Neg_Pred_value=temp$`Neg Pred Value`,Precision=temp$Precision, Recall=temp$Recall,F1=temp$F1 ,Prevalence= temp$Prevalence,Detection_rate=temp$`Detection Rate`, Detection_prevalence=temp$`Detection Prevalence`,Balanced_Accuracy=temp$`Balanced Accuracy`)
+
+rownames(confusionM)<-c("Random Forest","Gradient Boosting")
+```
+
+##Part 1 of analysis RF VS GB
+
+#Current review on the two models
+```{r}
+confusionM
+```
+
+#see ROCs of gradient boosted DT and random forest
+```{r}
+rocs<-list(Gradient_Boost=gb.auc,Random_Forest=rf.auc)
+ggroc(rocs)+ggtitle("ROC Performance of current models")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+```
+
+#see Precision-Recall Plots of the two models
+```{r}
+rf.perf<-h2o.performance(rf.v2,test.h2o)%>%h2o.metric()%>%as.data.frame()%>%select(c(recall,precision))
+rf.perf$model<-"Random Forest"
+gb.perf<-h2o.performance(gb_v2,test.h2o)%>%h2o.metric()%>%as.data.frame()%>%select(c(recall,precision))
+gb.perf$model<-"Gradient Boosted DT"
+combine_rpplots<-rbind(rf.perf,gb.perf)
+
+ggplot(combine_rpplots,aes(recall,precision,group=model,color=model))+geom_line()+labs(title ="Precision-Recall AUC Curve",legend="current ML models")+theme_light()
+```
+
+#Plotting residuals vs fitted
+```{r}
+rf.summary<-rf.summary%>%mutate(resid=as.numeric(obs)-as.numeric(pred))
+gb.summary<-gb.summary%>%mutate(resid=as.numeric(obs)-as.numeric(pred))
+g1<-gb.summary%>%ggplot(aes(pred,resid))+geom_point()+labs(title="GBDT| Residuals vs Predicted",y="Residuals",x="Predicted")+theme_light()
+g2<-rf.summary%>%ggplot(aes(pred,resid))+geom_point()+labs(title="RF| Residuals vs Predicted",y="Residuals",x="Predicted")+theme_light()
+
+plt2<-ggarrange(g1,g2,ncol = 2)
+annotate_figure(plt2,top = text_grob("Residuals vs Predicted values across Models",size=9))
+```
+
+#feature analysis. Plotting top ten feature by its gini score
+```{r}
+rf.features<-h2o.varimp(rf.v2)%>%as.data.frame()
+gb.features<-h2o.varimp(gb_v2)%>%as.data.frame()
+
+g1<-rf.features%>%ggplot(aes(y=variable,x=scaled_importance))+geom_bar(stat="identity")+theme_light()
+g2<-gb.features%>%ggplot(aes(y=variable,x=scaled_importance))+geom_bar(stat="identity")+theme_light()
+
+plt3<-ggarrange(g1,g2,ncol = 2)
+annotate_figure(plt3,top = text_grob("Feauture Importance Across Models",size=9))
+```
+
+## Model 3 |Auto ML Models
+
+
+### Run AutoML for 5 base models using the "features" data.
+```{r}
+aml <- h2o.automl(x = features, y = response,
+                  training_frame = train.h2o,
+                  max_models = 5,
+                  seed = 1)
+```
+
+### View the AutoML Leaderboard
+```{r}
+lb <- aml@leaderboard
+head(lb, n = nrow(lb))  # Print all rows instead of default (6 rows)
+```
+
+### View the Leader Model
+```{r}
+leader_model <- aml@leader
+leader_model
+```
+
+### AutoML Leader-Board Predictions
+```{r}
+# Make predictions on the validation set
+pred <- h2o.predict(aml@leader, test.h2o)
+```
+
+```{r}
+# Convert H2O frame to a data frame
+predictions_df <- as.data.frame(pred)
+
+head(predictions_df)
+```
+
+Top model with the "AUC" metric
+```{r}
+# Get the best model using a non-default metric
+m <- h2o.get_best_model(aml, criterion = "auc")
+m
+```
+
+
+### AutoML Performance
+
+```{r}
+# Extract actual values from the test set
+perf <- h2o.performance(leader_model, test.h2o )
+perf
+```
+
+```{r}
+#Generate predictions on a test set, you can make predictions directly on the `H2OAutoML` object
+aml_pred <- h2o.predict(leader_model, test.h2o)
+```
+
+```{r}
+#Accuracy measure on the test data
+amlpred_df <- as.data.frame(aml_pred$predict)
+amlpred_df$predict <- factor(amlpred_df$predict, levels = c(0,1))
+```
+
+#Print the confusion matrix
+```{r}
+#Accuracy measure on the test data
+aml_cm<-confusionMatrix(amlpred_df$predict,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+aml_cm
+```
+
+
+
+
+# Model 4 - Naive-Bayes
+```{r}
+# Build and train the model:
+pros_nb <- h2o.naiveBayes(x = features,
+                          y = response,
+                          training_frame = train.h2o,
+                          laplace = 0,
+                          nfolds = 5,
+                          seed = 1234, 
+                          keep_cross_validation_predictions = TRUE)
+```
+
+```{r}
+nb_perf <- h2o.performance(pros_nb, test.h2o)
+nb_perf
+```
+
+
+```{r}
+#Generate predictions on a test set, you can make predictions directly on the `H2OAutoML` object
+nb_pred <- h2o.predict(pros_nb, test.h2o)
+```
+
+```{r}
+#Accuracy measure on the test data
+nbpred_df <- as.data.frame(nb_pred$predict)
+nbpred_df$predict <- factor(nbpred_df$predict, levels = c(0,1))
+```
+
+
+```{r}
+#Accuracy measure on the test data
+nb_cm<-confusionMatrix(nbpred_df$predict,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+nb_cm
+```
+
+-----
+
+# Model 5 - SVM Model
+```{r}
+# Build and train the model:
+svm_model <- h2o.psvm(gamma = 0.01,
+                      rank_ratio = 0.1,
+                      x = features,
+                      y = response,
+                      training_frame = train.h2o,
+                      disable_training_metrics = FALSE,
+                      seed = 1)
+```
+
+```{r}
+svm_perf <- h2o.performance(svm_model, test.h2o)
+svm_perf
+```
+
+
+```{r}
+#Generate predictions on a test set, you can make predictions directly on the `H2OAutoML` object
+svm_pred <- h2o.predict(svm_model, test.h2o)
+```
+
+```{r}
+#Accuracy measure on the test data
+svmpred_df <- as.data.frame(svm_pred$predict)
+svmpred_df$predict <- factor(svmpred_df$predict, levels = c(0,1))
+```
+
+
+```{r}
+#Accuracy measure on the test data
+svm_cm<-confusionMatrix(svmpred_df$predict,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+svm_cm
+```
+
+
+----
+
+# Model 6 - Deep Learning
+```{r}
+# Build and train the model:
+dl <- h2o.deeplearning(x = features,
+                       y = response,
+                       distribution = "AUTO",
+                       hidden = c(1),
+                       epochs = 1000,
+                       train_samples_per_iteration = -1,
+                       reproducible = TRUE,
+                       activation = "Tanh",
+                       single_node_mode = FALSE,
+                       balance_classes = FALSE,
+                       force_load_balance = FALSE,
+                       seed = 23123,
+                       score_training_samples = 0,
+                       score_validation_samples = 0,
+                       training_frame = train.h2o,
+                       stopping_rounds = 0,
+                       keep_cross_validation_predictions = TRUE)
+```
+
+```{r}
+dl_perf <- h2o.performance(dl, test.h2o)
+dl_perf
+```
+
+```{r}
+#Generate predictions on a test set, you can make predictions directly on the `H2OAutoML` object
+dl_pred <- h2o.predict(dl, test.h2o)
+```
+
+```{r}
+#Accuracy measure on the test data
+dlpred_df <- as.data.frame(dl_pred$predict)
+dlpred_df$predict <- factor(dlpred_df$predict, levels = c(0,1))
+```
+
+
+```{r}
+#Accuracy measure on the test data
+dl_cm<-confusionMatrix(dlpred_df$predict,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+dl_cm
+```
+
+
+
+------
+
+## Part 2 Analysis| Comparison of Top LM model compared to other two models
+
+#Retrieve Top performing model and save separately
+#saving name: GBM_1_AutoML_1_20231119_133450
+```{r eval=FALSE}
+winining_aml<-aml@leader
+winining_aml@model$model_summary
+```
+
+
+#Retrieving Top performing Auto model and save its prediction separately for performance
+```{r}
+automl.pred<-h2o.predict(leader_model,test.h2o)%>%as.data.frame()%>%pull(predict)
+automl.precsnprob<-h2o.predict(leader_model,test.h2o)%>%as.data.frame()%>%pull(p1)
+automl.reclprob<-h2o.predict(aml@leader,test.h2o)%>%as.data.frame()%>%pull(p0)
+```
+
+
+
+```{r}
+#Print the confusion matrix
+automl.con<-confusionMatrix(automl.pred,test_data$WFRI_R,positive = "1",mode = "prec_recall")
+
+automl.con
+```
+
+
+#see summary results of automled ensemble model on the test data
+```{r}
+automl.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-automl.pred,
+      N<-automl.reclprob,
+      Y<-automl.precsnprob
+  )
+
+
+automl.summary<-automl.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....automl.pred", N="N....automl.reclprob", Y="Y....automl.precsnprob")
+
+automl.auc<-roc(automl.summary$obs,Y)
+
+
+temp<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(automl.summary$pred)),y_true =as.numeric(as.character( automl.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(automl.summary$pred)),as.numeric(as.character(automl.summary$obs))),
+  t.RSME<-RMSE(as.numeric(as.character(automl.summary$pred)),as.numeric(as.character(automl.summary$obs))),
+  t.AUC<-automl.auc$auc,
+  t.ClassError<-mean(automl.summary$pred!=automl.summary$obs)
+  
+)
+
+automl.summary
+```
+
+#plotting ROC curve of gradient boosted DT
+```{r}
+ggroc(automl.auc)+ggtitle("automl Ensemble Model's ROC Curve of AUC= 0.9934")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+
+
+temp<-temp%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.automl.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.automl.summary.pred....as.numeric.as.character.automl.summary.obs..."  
+,RMSE="t.RSME....RMSE.as.numeric.as.character.automl.summary.pred...."
+,AUC="t.AUC....automl.auc.auc",classError="t.ClassError....mean.automl.summary.pred....automl.summary.obs.")
+```
+
+#adding automled ensemble to the results data frame
+```{r}
+test.results[3,]<-c(R2=temp$R2,MSE=temp$MSE,RMSE=temp$RMSE,AUC=temp$AUC,classError=temp$classError)
+rownames(test.results)<-c("Random Forest","Gradient Boosting","automled Ensemble")
+```
+
+#storing confusion matrix testing results
+```{r}
+temp<-automl.con$byClass%>%as.data.frame()%>%t()
+temp<-as.data.frame(temp)
+
+confusionM<-confusionM%>%add_row(Sensitivity= temp$Sensitivity,Specificity=temp$Specificity, Pos_pred_value=temp$`Pos Pred Value`,Neg_Pred_value=temp$`Neg Pred Value`,Precision=temp$Precision, Recall=temp$Recall,F1=temp$F1 ,Prevalence= temp$Prevalence,Detection_rate=temp$`Detection Rate`, Detection_prevalence=temp$`Detection Prevalence`,Balanced_Accuracy=temp$`Balanced Accuracy`)
+
+rownames(confusionM)<-c("Random Forest","Gradient Boosting","automled Ensemble")
+```
+
+#See precision and recall for all three models
+```{r eval=FALSE}
+automl.perf<-h2o.performance(leader_model,test.h2o)%>%h2o.metric()%>%as.data.frame()%>%select(c(recall,precision))
+automl.perf$model<-"automled Ensemble"
+combine_rpplots<-rbind(rf.perf,gb.perf,automl.perf)
+
+ggplot(combine_rpplots,aes(recall,precision,group=model,color=model))+geom_line()+labs(title ="Precision-Recall AUC Curve",legend="current ML models")+theme_light()
+```
+
+#see ROCs of all models
+```{r}
+rocs<-list(Gradient_Boost=gb.auc,Random_Forest=rf.auc,automled_ensemble=automl.auc)
+ggroc(rocs)+ggtitle("ROC Performance of all Models")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+```
+
+---
+
+```{r}
+library(pROC)
+library(ggplot2)
+```
+
+
+```{r}
+rocs<-list(Gradient_Boost=gb.auc,Random_Forest=rf.auc)
+ggroc(rocs)+ggtitle("ROC Performance of current models")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+```
+
+
+###Include NB, DPL, and SVM
+
+```{r}
+#Including NB, DPL,SVM models in the roc graph
+
+nb.pred<-h2o.predict(pros_nb,test.h2o)%>%as.data.frame()%>%pull(predict)
+nb.precsnprob<-h2o.predict(pros_nb,test.h2o)%>%as.data.frame()%>%pull(p1)
+nb.reclprob<-h2o.predict(pros_nb,test.h2o)%>%as.data.frame()%>%pull(p0)
+
+
+nb.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-nb.pred,
+      N<-nb.reclprob,
+      Y<-nb.precsnprob
+  )
+
+svm.pred<-h2o.predict(svm_model,test.h2o)%>%as.data.frame()%>%pull(predict)
+svm.precsnprob<-h2o.predict(svm_model,test.h2o)%>%as.data.frame()%>%pull(p1)
+svm.reclprob<-h2o.predict(svm_model,test.h2o)%>%as.data.frame()%>%pull(p0)
+
+
+svm.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-svm.pred,
+      N<-svm.reclprob,
+      Y<-svm.precsnprob
+  )
+
+
+dl.pred<-h2o.predict(dl,test.h2o)%>%as.data.frame()%>%pull(predict)
+dl.precsnprob<-h2o.predict(dl,test.h2o)%>%as.data.frame()%>%pull(p1)
+dl.reclprob<-h2o.predict(dl,test.h2o)%>%as.data.frame()%>%pull(p0)
+
+
+dl.summary<-data.frame(
+      obs<-test_data$WFRI_R,
+      pred<-dl.pred,
+      N<-dl.reclprob,
+      Y<-dl.precsnprob
+  )
+
+nb.summary<-nb.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....nb.pred", N="N....nb.reclprob", Y="Y....nb.precsnprob")
+
+nb.auc<-roc(nb.summary$obs,Y)
+
+svm.summary<-svm.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....svm.pred", N="N....svm.reclprob", Y="Y....svm.precsnprob")
+
+svm.auc<-roc(svm.summary$obs,Y)
+
+dl.summary<-dl.summary%>%rename(obs="obs....test_data.WFRI_R",pred="pred....dl.pred", N="N....dl.reclprob", Y="Y....dl.precsnprob")
+
+dl.auc<-roc(dl.summary$obs,Y)
+
+rocs<-list(Gradient_Boost=gb.auc,Random_Forest=rf.auc,automl_ensemble=automl.auc,Navie_Bayes=nb.auc,supervised_learning=svm.auc,Deep_learning=dl.auc)
+ggroc(rocs)+ggtitle("ROC Performance of all Models")+geom_segment(aes(x=1,y=0,xend=0,yend=1),linetype="dotted",color="red")+theme_light()
+
+#Updating test results for model performance for all remaining models
+temp<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(nb.summary$pred)),y_true =as.numeric(as.character( nb.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(nb.summary$pred)),as.numeric(as.character(nb.summary$obs))),
+  t.RMSE<-RMSE(as.numeric(as.character(nb.summary$pred)),as.numeric(as.character(nb.summary$obs))),
+  t.AUC<-nb.auc$auc,
+  t.ClassError<-mean(nb.summary$pred!=nb.summary$obs)
+  
+)
+temp<-temp%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.nb.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.nb.summary.pred....as.numeric.as.character.nb.summary.obs..."  
+,RMSE="t.RMSE....RMSE.as.numeric.as.character.nb.summary.pred....as.numeric.as.character.nb.summary.obs..."
+,AUC="t.AUC....nb.auc.auc",classError="t.ClassError....mean.nb.summary.pred....nb.summary.obs.")
+
+test.results[4,]<-c(R2=temp$R2,MSE=temp$MSE,RMSE=temp$RMSE,AUC=temp$AUC,classError=temp$classError)
+rownames(test.results)<-c("Random Forest","Gradient Boosting","automl- stack ensemble","Navie Bayes")
+
+temp<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(svm.summary$pred)),y_true =as.numeric(as.character( svm.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(svm.summary$pred)),as.numeric(as.character(svm.summary$obs))),
+  t.RMSE<-RMSE(as.numeric(as.character(svm.summary$pred)),as.numeric(as.character(svm.summary$obs))),
+  t.AUC<-svm.auc$auc,
+  t.ClassError<-mean(svm.summary$pred!=svm.summary$obs)
+  
+)
+temp<-temp%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.svm.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.svm.summary.pred....as.numeric.as.character.svm.summary.obs..."  
+,RMSE="t.RMSE....RMSE.as.numeric.as.character.svm.summary.pred....as.numeric.as.character.svm.summary.obs..."
+,AUC="t.AUC....svm.auc.auc",classError="t.ClassError....mean.svm.summary.pred....svm.summary.obs.")
+
+test.results[5,]<-c(R2=temp$R2,MSE=temp$MSE,RMSE=temp$RMSE,AUC=temp$AUC,classError=temp$classError)
+rownames(test.results)<-c("Random Forest","Gradient Boosting","automl- stack ensemble","Navie Bayes","Supervised Learning Model")
+
+temp<-data.frame(
+  t.R2<-R2_Score(y_pred = as.numeric(as.character(dl.summary$pred)),y_true =as.numeric(as.character( dl.summary$obs))),
+  t.mse<-MSE(as.numeric(as.character(dl.summary$pred)),as.numeric(as.character(dl.summary$obs))),
+  t.RMSE<-RMSE(as.numeric(as.character(dl.summary$pred)),as.numeric(as.character(dl.summary$obs))),
+  t.AUC<-dl.auc$auc,
+  t.ClassError<-mean(dl.summary$pred!=dl.summary$obs)
+  
+)
+temp<-temp%>%rename(R2="t.R2....R2_Score.y_pred...as.numeric.as.character.dl.summary.pred....",MSE="t.mse....MSE.as.numeric.as.character.dl.summary.pred....as.numeric.as.character.dl.summary.obs..."  
+,RMSE="t.RMSE....RMSE.as.numeric.as.character.dl.summary.pred....as.numeric.as.character.dl.summary.obs..."
+,AUC="t.AUC....dl.auc.auc",classError="t.ClassError....mean.dl.summary.pred....dl.summary.obs.")
+
+test.results[5,]<-c(R2=temp$R2,MSE=temp$MSE,RMSE=temp$RMSE,AUC=temp$AUC,classError=temp$classError)
+rownames(test.results)<-c("Random Forest","Gradient Boosting","automl- stack ensemble","Navie Bayes","Deep Learning")
+
+```
+
+
+
+```{r}
+
+# Assuming you have defined the rocs2 list with AUC values
+rocs2 <- list(
+  Gradient_Boost = roc(gb.summary$obs, gb.summary$Y),
+  Random_Forest = roc(rf.summary$obs, rf.summary$Y),
+  Stacked_ensemble = roc(stack.summary$obs, stack.summary$Y),
+  
+)
+
+# Convert the list of ROC objects to a data frame
+roc_data <- do.call(rbind, lapply(names(rocs2), function(model) {
+  data.frame(
+    model = model,
+    sensitivity = rocs2[[model]]$sensitivities,
+    specificity = 1 - rocs2[[model]]$specificities
+  )
+}))
+
+# Create a ggplot object with reversed x-axis layout
+ggplot(roc_data, aes(x = specificity, y = sensitivity, color = model)) +
+  geom_line() +  # Use default line weight
+  ggtitle("ROC Performance of all Models") +
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 1), linetype = "dashed", color = "red") +
+  theme_light() +
+  scale_x_continuous(
+    breaks = seq(1, 0, by = -0.1),  # Reverse the breaks
+    labels = seq(1, 0, by = -0.1),  # Reverse the labels
+    limits = c(0, 1)  # Adjust the limits as needed
+  )
+
+
+```
+
+
+
+# Tables - Confusion Matrix
+```{r eval=FALSE}
+names(nb_cm$byClass)
+```
+
+```{r eval=TRUE}
+names(nb_cm$overall)
+```
+
+```{r}
+metrics_drf <- c(rf.con$overall[1], rf.con$byClass[5], rf.con$byClass[6], rf.con$byClass[7])
+metrics_aml <- c(aml_cm$overall[1], aml_cm$byClass[5], aml_cm$byClass[6], aml_cm$byClass[7])
+metrics_dl <- c(dl_cm$overall[1], dl_cm$byClass[5], dl_cm$byClass[6], dl_cm$byClass[7])
+metrics_gbm <- c(gb.con$overall[1], gb.con$byClass[5], gb.con$byClass[6], gb.con$byClass[7])
+metrics_nb <- c(nb_cm$overall[1], nb_cm$byClass[5], nb_cm$byClass[6], nb_cm$byClass[7])
+metrics_svm <- c(svm_cm$overall[1], svm_cm$byClass[5], svm_cm$byClass[6], svm_cm$byClass[7])
+
+# Round the values to four decimals
+metrics_drf <- round(metrics_drf, 4)
+metrics_aml <- round(metrics_aml, 4)
+metrics_dl <- round(metrics_dl, 4)
+metrics_gbm <- round(metrics_gbm, 4)
+metrics_nb <- round(metrics_nb, 4)
+metrics_svm <- round(metrics_svm, 4)
+
+tab_pref <- rbind(metrics_drf, metrics_aml, metrics_dl, metrics_gbm, metrics_nb, metrics_svm)
+rownames(tab_pref) <- c("Distributed Random Forest", 
+                        "AutoML", "Deep Learning", 
+                        "Gradient Boosting Machine", 
+                        "Naive Bayes", "Support Vector Machine")
+
+
+# Identify the column index of the accuracy values in your data frame
+accuracy_column_index <- 1  
+
+# Order the rows of the data frame based on accuracy in descending order
+tab_pref <- tab_pref[order(-tab_pref[, accuracy_column_index]), ]
+
+# Create the data frame with the "Model" index name
+(tab.pref <- data.frame( tab_pref))
+
+```
+
+### Visualization
+```{r}
+# Increase bottom margin
+par(mar = c(6, 4, 6, 4))
+
+# Your existing barplot code
+bp <- barplot(tab_pref, 
+              col = c("#0000EE", "#00FF00", "#FF6EEB", "#EEEE00", "#FF8C69", "#528B8B"), 
+              beside = TRUE)
+
+# Legend at the bottom
+legend(x = "bottom", 
+       y = -0.4, 
+       legend = c("Random Forest", "AutoML", "Deep Learning", "Gradient Boosting", "Naive Bayes", "SVM"),
+       fill = c("#0000EE", "#00FF00", "#FF6EEB", "#EEEE00", "#FF8C69", "#528B8B"),
+       cex = 0.53, 
+       ncol = 6)
+
+```
+
+
+## Model Accuracy and Unique Hyperparameters
+```{r}
+# Create a data frame with the information
+model_data <- data.frame(
+  Model = c("Distributed Random Forest (DRF)",
+            "AutoML (Automatic Machine Learning)",
+            "Deep Learning",
+            "Gradient Boosting Machine (GBM)",
+            "Naïve-Bayes (NB)",
+            "Support Vector Machine (SVM)"
+  ),
+  Accuracy = round(c(rf.con$overall[1], aml_cm$overall[1], dl_cm$overall[1], 
+               gb.con$overall[1], nb_cm$overall[1], svm_cm$overall[1]), 4),
+  Unique_Hyperparameters = c("balance_classes = FALSE",
+                             "max_models = 5",
+                             "Hidden = c(1), activation = 'Tanh', epochs = 1000",
+                             "learn_rate = 0.1, ntrees = 1000",
+                             "",
+                             "Gamma = 0.01, rank_ratio = 0.1"
+  )
+)
+
+# Order the values in descending order based on the "Model" column
+model_df2 <- model_data[order(model_data$Model, decreasing = FALSE), ]
+
+# Print the table
+(model.df2 <- data.frame(model_df2))
+```
+
+
+## Confusion Matrix Model Heatmaps 
+
+```{r}
+#install.packages("dplyr")
+library(dplyr)
+```
+
+
+```{r}
+# Function to create a custom confusion matrix plot
+create_confusion_matrix_plot <- function(cm, title) {
+  # Convert confusion matrix to a data frame
+  cm_data <- as.data.frame(cm$table)
+  
+  # Create a custom confusion matrix plot with different colors for each category
+  ggplot(cm_data, aes(x = Reference, y = Prediction, fill = as.factor(Category), label = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(vjust = 1, hjust = 0.5) +  # Center text
+    scale_fill_manual(values = c("#3498db", "#2ecc71", "#e74c3c", "#f39c12"), name = "Category") +  # Assign colors
+    labs(title = title,
+         x = "Predicted",
+         y = "Actual") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))  # Center the title
+}
+
+# List of confusion matrices with categories
+confusion_matrices <- list(
+  Random_Forest = rf.con,
+  AutoML = aml_cm,
+  Deep_Learning = dl_cm,
+  Gradient_Boosting = gb.con,
+  Naive_Bayes = nb_cm,
+  Support_Vector_Machine = svm_cm
+)
+
+# Add a 'Category' column to the data frames representing the four categories
+all_cm_data <- do.call(rbind, lapply(names(confusion_matrices), function(name) {
+  cm <- confusion_matrices[[name]]
+  cm_data <- as.data.frame(cm$table)
+  cm_data$Category <- factor(rep(c("True Negative", "False Negative", "False Positive", "True Positive"), each = nrow(cm_data)/4))
+  cm_data$Model <- name
+  return(cm_data)
+}))
+
+# Create and display a facet_wrap confusion matrix plot with different colors for each category
+ggplot(all_cm_data, aes(x = Reference, y = Prediction, fill = as.factor(Category), label = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(vjust = 1, hjust = 0.5) +  # Center text
+  scale_fill_manual(values = c("#3498db", "#2ecc71", "#e74c3c", "#f39c12"), name = "Category") +  # Assign colors
+  labs(title = "Confusion Matrix Heatmaps",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +  # Center the title
+  facet_wrap(~Model, scales = "free")  # Create a separate panel for each model
+```
+
+
+## Confusion Matrix Tables for Models
+
+```{r}
+# Create an empty list to store dataframes
+confusion_matrix_dataframes <- list()
+
+for (name in names(confusion_matrices)) {
+  cm <- confusion_matrices[[name]]
+  
+  # Accessing individual values from the confusion matrix
+  TP <- cm$table[2, 2]  # second row and second column
+  TN <- cm$table[1, 1]  # first row and first column
+  FP <- cm$table[1, 2]  # first row and second column
+  FN <- cm$table[2, 1]  # second row and first column
+  
+  # Create a dataframe for each model
+  model_dataframe <- data.frame(
+    Model = name,
+    True_Positive = TP,
+    True_Negative = TN,
+    False_Positive = FP,
+    False_Negative = FN
+  )
+  
+  # Append the dataframe to the list
+  confusion_matrix_dataframes[[name]] <- model_dataframe
+}
+
+# Combine all dataframes into a single dataframe without row names
+all_confusion_matrices_df <- bind_rows(confusion_matrix_dataframes)
+
+# Combine all dataframes into a single dataframe without row names
+all_confusion_matrices_df <- bind_rows(confusion_matrix_dataframes)
+
+# Arrange the dataframe in descending order based on the "True_Positive" column
+all_confusion_matrices_df <- arrange(all_confusion_matrices_df, desc(True_Positive))
+
+# Print the resulting dataframe
+print(all_confusion_matrices_df)
+```
+
+
+## True Positive Rate vs False Positive Rate
+```{r}
+# Extract True Positive Rate or Sensitivity values
+sens_drf <- round(rf.con$byClass[1], 4)
+sens_aml <- round(aml_cm$byClass[1], 4)
+sens_dl <- round(dl_cm$byClass[1], 4)
+sens_gbm <- round(gb.con$byClass[1], 4)
+sens_nb <- round(nb_cm$byClass[1], 4)
+sens_svm <- round(svm_cm$byClass[1], 4)
+
+# Calculate False Positive Rate (FPR)
+fpr_drf <- round(1 - sens_drf, 4)
+fpr_aml <- round(1 - sens_aml, 4)
+fpr_dl <- round(1 - sens_dl, 4)
+fpr_gbm <- round(1 - sens_gbm, 4)
+fpr_nb <- round(1 - sens_nb, 4)
+fpr_svm <- round(1 - sens_svm, 4)
+
+# Create a data frame to store the results
+results <- data.frame(
+  Model = c("Random Forest", "AutoML", "Deep Learning", "Gradient Boosting", "Naive Bayes", "Support Vector Machine"),
+  TPR = c(sens_drf, sens_aml, sens_dl, sens_gbm, sens_nb, sens_svm),
+  FPR = c(fpr_drf, fpr_aml, fpr_dl, fpr_gbm, fpr_nb, fpr_svm)
+)
+
+# Arrange in descending order
+results <- results[order(-results$TPR), ]
+
+# Multiply values by 100
+#results$TPR <- results$TPR * 100
+#results$FPR <- results$FPR * 100
+
+# Print the results
+print(results)
+```
+
+## Visualization of TPR vs FPR 
+```{r}
+# Arrange in descending order by TPR
+results <- results[order(-results$TPR), ]
+
+# Create a scatter plot for each model
+ggplot(results, aes(x = FPR, y = TPR, group = Model, color = Model)) +
+  geom_point(size = 6) +
+  labs(title = "TPR vs. FPR",
+       x = "False Positive Rate (FPR)",
+       y = "True Positive Rate (TPR)") +
+  theme_light() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+##Variance Importance Plot
+
+These model doesn't have variable importances: `aml`, `pros_nb`, and `svm_model`
+```{r}
+h2o.varimp_plot(rf.v2)
+
+```
+
+```{r}
+h2o.varimp_plot(gb_v2)
+
+```
+
+
+```{r}
+h2o.varimp_plot(dl)
+
+```
+
+
+
+```{r eval=FALSE}
+h2o.shutdown()
+````
