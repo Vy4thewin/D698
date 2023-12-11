@@ -954,7 +954,7 @@ rownames(test.results)<-c("Random Forest","Gradient Boosting","automl- stack ens
 rocs2 <- list(
   Gradient_Boost = roc(gb.summary$obs, gb.summary$Y),
   Random_Forest = roc(rf.summary$obs, rf.summary$Y),
-  Stacked_ensemble = roc(stack.summary$obs, stack.summary$Y),
+  Stacked_ensemble = roc(automl.summary$obs, automl.summary$Y)
   
 )
 
@@ -1254,4 +1254,4 @@ h2o.varimp_plot(dl)
 
 ```{r eval=FALSE}
 h2o.shutdown()
-````
+```
